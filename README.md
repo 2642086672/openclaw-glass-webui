@@ -4,7 +4,7 @@
 
 A third-party glassmorphism control panel for [OpenClaw](https://openclaw.ai) Gateway — visionOS / iOS "Liquid Glass" style, fully bilingual (中文 / English). Mount it as your Gateway dashboard **skin**, or run it standalone.
 
-> 📖 **新手教程**:[docs/使用说明.md](docs/使用说明.md) — 从零开始的安装与使用指南(中文,含 FAQ)
+> 📖 **新手教程**:[docs/USAGE.zh-CN.md](docs/USAGE.zh-CN.md) — 从零开始的安装与使用指南(中文,含 FAQ)
 
 ---
 
