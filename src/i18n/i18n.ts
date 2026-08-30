@@ -1,0 +1,345 @@
+// 轻量 i18n:中英字典 + localStorage 记忆 + 错误码本地化映射
+export type Locale = 'zh' | 'en';
+
+const LOCALE_KEY = 'openclaw-webui.locale';
+
+const dict = {
+  // 通用
+  appName: { zh: 'OpenClaw 控制台', en: 'OpenClaw Console' },
+  loading: { zh: '加载中…', en: 'Loading…' },
+  retry: { zh: '立即重试', en: 'Retry now' },
+  cancel: { zh: '取消', en: 'Cancel' },
+  save: { zh: '保存', en: 'Save' },
+  confirm: { zh: '确认', en: 'Confirm' },
+  delete: { zh: '删除', en: 'Delete' },
+  empty: { zh: '暂无内容', en: 'Nothing here yet' },
+  error: { zh: '出错了', en: 'Something went wrong' },
+
+  // 导航
+  navChat: { zh: '聊天', en: 'Chat' },
+  navSessions: { zh: '会话', en: 'Sessions' },
+  navCron: { zh: '任务', en: 'Cron' },
+  navSkills: { zh: '技能', en: 'Skills' },
+  navDevices: { zh: '设备', en: 'Devices' },
+  navLogs: { zh: '日志', en: 'Logs' },
+  navUsage: { zh: '用量', en: 'Usage' },
+  navStatus: { zh: '状态', en: 'Status' },
+  navSettings: { zh: '设置', en: 'Settings' },
+
+  // 连接状态
+  connConnected: { zh: '已连接', en: 'Connected' },
+  connConnecting: { zh: '连接中…', en: 'Connecting…' },
+  connDisconnected: { zh: '连接断开,正在重连…', en: 'Connection lost — reconnecting…' },
+  connNeedAuth: { zh: '需要登录', en: 'Sign-in required' },
+
+  // 设置页
+  settingsLanguage: { zh: '语言 / Language', en: 'Language / 语言' },
+  settingsConnection: { zh: '网关连接', en: 'Gateway connection' },
+  settingsGatewayUrl: { zh: '网关地址', en: 'Gateway URL' },
+  settingsToken: { zh: '访问令牌', en: 'Access token' },
+  settingsTokenHint: { zh: '令牌仅保存在当前标签页(sessionStorage),关闭标签页即清除,不会写入磁盘。', en: 'Token is kept in this tab only (sessionStorage) and cleared when the tab closes.' },
+  settingsConnect: { zh: '连接', en: 'Connect' },
+  settingsDisconnect: { zh: '断开', en: 'Disconnect' },
+  settingsConnected: { zh: '已连接,网关版本 {version}', en: 'Connected, gateway version {version}' },
+  settingsAppearance: { zh: '外观', en: 'Appearance' },
+  settingsThemeFollow: { zh: '深浅色跟随系统', en: 'Follow system light/dark' },
+  settingsAbout: { zh: '关于', en: 'About' },
+  settingsAboutText: {
+    zh: '第三方 OpenClaw Gateway 控制面板,直连 Gateway WebSocket 协议(protocol v4)。纯本地应用,不外发任何数据。',
+    en: 'A third-party OpenClaw Gateway control panel speaking the Gateway WebSocket protocol (protocol v4). Fully local, no data leaves this device.',
+  },
+
+  // 登录引导
+  loginTitle: { zh: '连接到 OpenClaw Gateway', en: 'Connect to OpenClaw Gateway' },
+  loginSubtitle: { zh: '输入网关访问令牌开始使用(见 openclaw.json 的 gateway.auth.token)', en: 'Enter the gateway access token to begin (gateway.auth.token in openclaw.json)' },
+  deviceQuickLogin: { zh: '快速登录(已配对设备)', en: 'Quick sign-in (paired device)' },
+  deviceQuickLoginHint: { zh: '本浏览器已配对过,无需再输令牌', en: 'This browser is already paired — no token needed' },
+  deviceLoginOr: { zh: '或使用令牌登录', en: 'or sign in with token' },
+  loginNoSecureContext: {
+    zh: '当前页面不是安全上下文,无法使用 WebCrypto。请通过 http://127.0.0.1 或 https 访问。',
+    en: 'This page is not a secure context, so WebCrypto is unavailable. Use http://127.0.0.1 or https.',
+  },
+
+  // 聊天
+  chatNewSession: { zh: '新聊天', en: 'New chat' },
+  chatModelPicker: { zh: '切换本会话使用的模型', en: 'Switch model for this session' },
+  chatPlaceholder: { zh: '输入消息…(Enter 发送,Shift+Enter 换行)', en: 'Type a message… (Enter to send, Shift+Enter for newline)' },
+  chatSend: { zh: '发送', en: 'Send' },
+  chatStop: { zh: '停止', en: 'Stop' },
+  chatThinking: { zh: '正在思考…', en: 'Thinking…' },
+  chatRunningTool: { zh: '正在执行工具:{name}', en: 'Running tool: {name}' },
+  chatRunFinished: { zh: '回复完成', en: 'Reply complete' },
+  chatRunAborted: { zh: '已中止', en: 'Aborted' },
+  chatToolOutput: { zh: '工具输出', en: 'Tool output' },
+  chatToolCall: { zh: '工具调用', en: 'Tool call' },
+  chatNoSession: { zh: '选择或创建一个会话开始聊天', en: 'Select or create a session to start chatting' },
+  chatHistoryOmitted: { zh: '[消息过大,已省略]', en: '[Message too large, omitted]' },
+  chatCompacted: { zh: '—— 历史已压缩 ——', en: '— History compacted —' },
+
+  // 会话列表
+  sessionsTitle: { zh: '全部会话', en: 'All sessions' },
+  sessionsPinned: { zh: '置顶', en: 'Pinned' },
+  sessionsOthers: { zh: '最近', en: 'Recent' },
+  sessionsArchived: { zh: '已归档', en: 'Archived' },
+  sessionsRename: { zh: '重命名', en: 'Rename' },
+  sessionsPin: { zh: '置顶', en: 'Pin' },
+  sessionsUnpin: { zh: '取消置顶', en: 'Unpin' },
+  sessionsArchive: { zh: '归档', en: 'Archive' },
+  sessionsUnarchive: { zh: '恢复', en: 'Unarchive' },
+  sessionsShowArchived: { zh: '显示已归档', en: 'Show archived' },
+  sessionsHideArchived: { zh: '隐藏已归档', en: 'Hide archived' },
+  sessionsNewName: { zh: '新的会话名称', en: 'New session name' },
+  sessionsEmpty: { zh: '还没有会话,去聊天页新建一个吧', en: 'No sessions yet — create one from the Chat tab' },
+  sessionsActiveRun: { zh: '运行中', en: 'Active' },
+  sessionsUnread: { zh: '有新消息', en: 'Unread' },
+
+  // 状态页
+  statusTitle: { zh: '网关主机状态', en: 'Gateway host status' },
+  statusMachine: { zh: '主机', en: 'Machine' },
+  statusOS: { zh: '系统', en: 'OS' },
+  statusCPU: { zh: '处理器', en: 'CPU' },
+  statusLoad: { zh: '负载 (1/5/15min)', en: 'Load (1/5/15min)' },
+  statusMemory: { zh: '内存', en: 'Memory' },
+  statusDisk: { zh: '磁盘', en: 'Disk' },
+  statusUptime: { zh: '运行时长', en: 'Uptime' },
+  statusGateway: { zh: '网关', en: 'Gateway' },
+  statusNode: { zh: 'Node 版本', en: 'Node version' },
+  statusLan: { zh: '局域网地址', en: 'LAN address' },
+  statusUsedTotal: { zh: '已用 / 总量', en: 'Used / Total' },
+  statusPath: { zh: '路径', en: 'Path' },
+  statusModels: { zh: '可用模型', en: 'Available models' },
+  statusRefreshEvery: { zh: '每 10 秒自动刷新', en: 'Auto-refreshes every 10s' },
+
+  // 定时任务
+  cronTitle: { zh: '定时任务', en: 'Cron jobs' },
+  cronNext: { zh: '下次', en: 'Next' },
+  cronLast: { zh: '上次', en: 'Last' },
+  cronRunNow: { zh: '立即运行', en: 'Run now' },
+  cronEnable: { zh: '启用', en: 'Enable' },
+  cronDisable: { zh: '停用', en: 'Disable' },
+  cronDisabled: { zh: '已停用', en: 'Disabled' },
+  cronLastError: { zh: '上次运行出错', en: 'Last run failed' },
+  cronIsolated: { zh: '隔离会话', en: 'Isolated' },
+  cronEmpty: { zh: '没有定时任务', en: 'No cron jobs' },
+  cronDeleteConfirm: { zh: '确定删除任务「{name}」?', en: 'Delete job "{name}"?' },
+
+  // 技能
+  skillsTitle: { zh: '技能', en: 'Skills' },
+  skillsReady: { zh: '可用', en: 'ready' },
+  skillsSearch: { zh: '搜索技能名称或描述…', en: 'Search skills…' },
+  skillBundled: { zh: '内置', en: 'Bundled' },
+  skillCustom: { zh: '自定义', en: 'Custom' },
+  skillDisabled: { zh: '已禁用', en: 'Disabled' },
+  skillIneligible: { zh: '不可用', en: 'Unavailable' },
+
+  // 设备
+  devicesTitle: { zh: '设备与节点', en: 'Devices & nodes' },
+  devicesPending: { zh: '待配对请求', en: 'Pending pairing' },
+  devicesPaired: { zh: '已配对设备', en: 'Paired devices' },
+  devicesNodes: { zh: '节点', en: 'Nodes' },
+  devicesPresence: { zh: '在线状态', en: 'Presence' },
+  devicesPendingHint: { zh: '新设备请求接入网关,确认后批准', en: 'A new device wants to connect. Approve if you trust it.' },
+  deviceApprove: { zh: '批准', en: 'Approve' },
+  deviceReject: { zh: '拒绝', en: 'Reject' },
+  deviceOnline: { zh: '在线', en: 'Online' },
+  deviceConnected: { zh: '已连接', en: 'Connected' },
+  deviceOffline: { zh: '离线', en: 'Offline' },
+
+  // 日志
+  logsTitle: { zh: '网关日志', en: 'Gateway logs' },
+  logsFollow: { zh: '跟随底部', en: 'Follow' },
+  logsClear: { zh: '清空', en: 'Clear' },
+  logsSearch: { zh: '过滤日志…', en: 'Filter logs…' },
+
+  // 会话偏好(设置页)
+  prefTitle: { zh: '会话偏好', en: 'Session preferences' },
+  prefForSession: { zh: '当前会话', en: 'current session' },
+  prefModel: { zh: '模型', en: 'Model' },
+  prefThinking: { zh: '思考深度', en: 'Thinking' },
+  prefFast: { zh: '极速模式', en: 'Fast mode' },
+  prefFastOn: { zh: '开', en: 'On' },
+  prefFastOff: { zh: '关', en: 'Off' },
+  prefSessionHint: { zh: '以上设置立即生效,只影响当前选中的会话;模型也可在聊天页顶部切换。', en: 'Applies to the selected session immediately. Model is also switchable in the chat header.' },
+  prefNoSession: { zh: '先在聊天页选择一个会话,再调整这些设置。', en: 'Select a session in Chat first, then adjust.' },
+
+  // 渠道 / 安全
+  channelsTitle: { zh: '渠道', en: 'Channels' },
+  channelsEmpty: { zh: '暂无渠道(或网关刚重启,渠道加载中)', en: 'No channels yet (or still loading after gateway restart)' },
+  securityTitle: { zh: '安全', en: 'Security' },
+  securityAuth: { zh: '网关认证', en: 'Gateway auth' },
+  securityProfile: { zh: '工具配置档', en: 'Tool profile' },
+  securityDeviceAuth: { zh: '设备配对', en: 'Device auth' },
+  securityEnabled: { zh: '已启用', en: 'Enabled' },
+  securityHint: { zh: '安全项为只读展示;如需修改请编辑 openclaw.json(改动前先备份)。', en: 'Read-only. Edit openclaw.json (with a backup first) to change.' },
+
+  // 用量
+  usageTitle: { zh: 'Token 用量', en: 'Token usage' },
+  usageSessions: { zh: '{n} 个会话', en: '{n} sessions' },
+  usageTotalTokens: { zh: '总 Tokens', en: 'Total tokens' },
+  usageTotalCost: { zh: '总费用', en: 'Total cost' },
+  usageInput: { zh: '输入', en: 'Input' },
+  usageOutput: { zh: '输出', en: 'Output' },
+  usageCacheRead: { zh: '缓存命中', en: 'Cache hit' },
+  usageColModel: { zh: '模型', en: 'Model' },
+  usageColInput: { zh: '输入', en: 'In' },
+  usageColOutput: { zh: '输出', en: 'Out' },
+  usageColCache: { zh: '缓存', en: 'Cache' },
+  usageColSessions: { zh: '会话', en: 'Sess.' },
+  usageColCost: { zh: '费用', en: 'Cost' },
+  usageEmpty: { zh: '暂无用量记录', en: 'No usage recorded yet' },
+  usageNote: { zh: '费用由网关按各模型单价(每百万 tokens)计算;单价可在 设置 → 模型管理 中配置。', en: 'Cost is computed by the gateway from each model\u2019s per-million pricing. Edit pricing in Settings → Models.' },
+
+  // 模型管理(设置页)
+  modelsCardTitle: { zh: '模型管理', en: 'Models' },
+  modelsAddTitle: { zh: '新增模型', en: 'Add model' },
+  modelsAddBtn: { zh: '添加模型', en: 'Add model' },
+  modelsDelete: { zh: '删除该提供商', en: 'Delete provider' },
+  modelsEdit: { zh: '编辑模型与价格', en: 'Edit models & pricing' },
+  modelsEditing: { zh: '编辑「{name}」', en: 'Editing "{name}"' },
+  modelsDeleteModel: { zh: '从该提供商删除此模型', en: 'Remove this model' },
+  modelsSave: { zh: '保存修改', en: 'Save changes' },
+  modelsEditHint: { zh: '价格单位为每百万 Tokens;保存后立即生效。API Key 不会被读取或覆盖,可放心编辑。', en: 'Prices are per 1M tokens and apply immediately. Your API key is never read or overwritten.' },
+  mpModelName: { zh: '显示名称', en: 'Display name' },
+  mpContext: { zh: '上下文窗口', en: 'Context window' },
+  mpMaxTokens: { zh: '最大输出', en: 'Max output' },
+  modelsEmpty: { zh: '还没有自定义模型,用下面的表单添加', en: 'No custom models yet — add one below' },
+  modelsHint: { zh: 'OpenAI 兼容接口适用于绝大多数服务;添加后立即生效,无需重启网关。', en: 'OpenAI-compatible works for most services. Changes apply immediately, no gateway restart needed.' },
+  mpCostTitle: { zh: '价格(每百万 Tokens,可选)', en: 'Pricing (per 1M tokens, optional)' },
+  mpCostInput: { zh: '输入(未命中缓存)', en: 'Input (cache miss)' },
+  mpCostCacheRead: { zh: '输入(命中缓存)', en: 'Input (cached)' },
+  mpCostOutput: { zh: '输出', en: 'Output' },
+  mpCostHint: { zh: '填写后用量页才能按模型计费;币种与你填写的一致,网关只做乘法。', en: 'Required for cost metering. Currency-agnostic — the gateway only multiplies.' },
+
+  // 配对引导
+  pairingTitle: { zh: '设备需要配对', en: 'Device pairing required' },
+  pairingBody: {
+    zh: '这是一个新的浏览器身份,需要在网关主机上批准一次。请在该主机终端执行:',
+    en: 'This is a new browser identity and needs one-time approval. On the gateway host, run:',
+  },
+  pairingNote: { zh: '批准后本页会自动重连。同一浏览器只需配对一次。', en: 'This page reconnects automatically after approval. Pairing is once per browser profile.' },
+
+  // 认证失败
+  authFailedTitle: { zh: '令牌无效', en: 'Invalid token' },
+  authFailedBody: { zh: '网关拒绝了该令牌,请检查后重新输入。', en: 'The gateway rejected this token. Please check and re-enter it.' },
+  identityFailedTitle: { zh: '设备身份初始化失败', en: 'Device identity failed to initialize' },
+  identityFailedBody: {
+    zh: '无法生成本机设备密钥(见浏览器控制台)。请确认使用最新版浏览器访问本页面,然后重试。',
+    en: 'Could not generate the local device key (see browser console). Use an up-to-date browser and retry.',
+  },
+
+  // 协议错误码 → 人话
+  errUnavailable: { zh: '网关正在启动中,稍后自动重试…', en: 'Gateway is starting up, retrying automatically…' },
+  errNotConnected: { zh: '尚未连接网关', en: 'Not connected to the gateway' },
+  errTimeout: { zh: '请求超时,请稍后重试', en: 'Request timed out, please retry' },
+  errUnknown: { zh: '发生未知错误', en: 'Unknown error' },
+} as const;
+
+export type StringKey = keyof typeof dict;
+
+let currentLocale: Locale = detectLocale();
+const listeners = new Set<() => void>();
+
+function detectLocale(): Locale {
+  try {
+    const saved = localStorage.getItem(LOCALE_KEY);
+    if (saved === 'zh' || saved === 'en') return saved;
+  } catch { /* ignore */ }
+  const nav = typeof navigator !== 'undefined' ? navigator.language : 'en';
+  return nav?.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+
+export function getLocale(): Locale {
+  return currentLocale;
+}
+
+export function setLocale(locale: Locale): void {
+  currentLocale = locale;
+  try { localStorage.setItem(LOCALE_KEY, locale); } catch { /* ignore */ }
+  listeners.forEach(fn => fn());
+}
+
+export function onLocaleChange(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+/** 取文案;支持 {placeholder} 插值。 */
+export function t(key: StringKey, vars?: Record<string, string | number>): string {
+  const entry: { zh: string; en: string } | undefined = dict[key];
+  if (!entry) return String(key);
+  let text: string = entry[currentLocale] ?? entry.en;
+  if (vars) {
+    for (const [k, v] of Object.entries(vars)) {
+      text = text.replaceAll(`{${k}}`, String(v));
+    }
+  }
+  return text;
+}
+
+/** 协议错误 → 本地化可读文案。 */
+export function localizeGatewayError(err: { code?: string; message?: string; details?: { code?: string } } | null | undefined): string {
+  if (!err) return t('errUnknown');
+  const code = err.details?.code || err.code;
+  switch (code) {
+    case 'PAIRING_REQUIRED':
+    case 'NOT_PAIRED':
+      return t('pairingTitle');
+    case 'AUTH_TOKEN_MISMATCH':
+    case 'AUTH_UNAUTHORIZED':
+    case 'AUTH_TOKEN_MISSING':
+      return t('authFailedBody');
+    case 'UNAVAILABLE':
+      return t('errUnavailable');
+    case 'CONTROL_UI_ORIGIN_NOT_ALLOWED':
+      return currentLocale === 'zh'
+        ? '浏览器来源未在网关白名单中:需在 openclaw.json 的 gateway.controlUi.allowedOrigins 添加本页面地址并重启网关。'
+        : 'Browser origin is not whitelisted: add this page\u2019s origin to gateway.controlUi.allowedOrigins in openclaw.json and restart the gateway.';
+    default:
+      return err.message || t('errUnknown');
+  }
+}
+
+/** 按当前语言格式化时间。 */
+export function formatTime(ts: number | undefined): string {
+  if (!ts) return '';
+  return new Intl.DateTimeFormat(currentLocale === 'zh' ? 'zh-CN' : 'en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(ts));
+}
+
+/** 按当前语言格式化相对时间。 */
+export function formatRelative(ts: number | undefined): string {
+  if (!ts) return '';
+  const diff = Date.now() - ts;
+  const rtf = new Intl.RelativeTimeFormat(currentLocale === 'zh' ? 'zh-CN' : 'en-US', { numeric: 'auto' });
+  if (diff < 60_000) return rtf.format(-Math.round(diff / 1000), 'second');
+  if (diff < 3_600_000) return rtf.format(-Math.round(diff / 60_000), 'minute');
+  if (diff < 86_400_000) return rtf.format(-Math.round(diff / 3_600_000), 'hour');
+  return rtf.format(-Math.round(diff / 86_400_000), 'day');
+}
+
+/** 按当前语言格式化字节。 */
+export function formatBytes(bytes: number | undefined): string {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes)) return '—';
+  const units = currentLocale === 'zh' ? ['B', 'KB', 'MB', 'GB', 'TB'] : ['B', 'KB', 'MB', 'GB', 'TB'];
+  let v = bytes;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+/** 按当前语言格式化时长。 */
+export function formatDuration(ms: number | undefined): string {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return '—';
+  const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return currentLocale === 'zh' ? `${d} 天 ${h} 小时` : `${d}d ${h}h`;
+  if (h > 0) return currentLocale === 'zh' ? `${h} 小时 ${m} 分` : `${h}h ${m}m`;
+  if (m > 0) return currentLocale === 'zh' ? `${m} 分 ${s % 60} 秒` : `${m}m ${s % 60}s`;
+  return currentLocale === 'zh' ? `${s} 秒` : `${s}s`;
+}

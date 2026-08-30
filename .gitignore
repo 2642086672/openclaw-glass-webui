@@ -1,0 +1,17 @@
+# 依赖与构建产物
+node_modules/
+dist/
+
+# 本地备份(含网关令牌与 API Key,严禁提交!)
+backups/
+
+# 交接文档(含个人环境信息)
+HANDOVER.md
+
+# 日志与系统文件
+*.log
+.DS_Store
+
+# 本地环境
+.env
+.vite/
