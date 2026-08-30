@@ -3,7 +3,7 @@ import { LitElement, html, nothing, type TemplateResult } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { store, type View } from '../state/store';
 import { t, localizeGatewayError } from '../i18n/i18n';
-import { icon } from '../icons';
+import { icon, renderBrand } from '../icons';
 import './chat-view';
 import './sessions-view';
 import './cron-view';
@@ -180,6 +180,11 @@ openclaw devices approve &lt;requestId&gt;</code></pre>
     ];
     return html`
       <div class="tab-bar tab-bar-scroll">
+        <div class="side-brand">
+          ${renderBrand(store.branding.appLogo, '🦞', 'side-logo')}
+          <div class="side-name">OpenClaw</div>
+          <div class="side-sub">${t('appName')}</div>
+        </div>
         ${tabs.map(tab => html`
           <button class="tab-btn ${store.view === tab.id ? 'active' : ''}" @click=${() => this.handleTab(tab.id)}>
             ${icon(tab.ic)}<span class="tab-label">${t(tab.key)}</span>

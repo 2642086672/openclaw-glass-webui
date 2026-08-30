@@ -151,6 +151,33 @@ export interface SessionUsageRow {
   updatedAt?: number;
 }
 
+// ---- 工作区文件(AI 记忆) ----
+
+export interface WorkspaceEntry {
+  path: string;
+  name: string;
+  kind: 'file' | 'directory' | string;
+  size?: number;
+  updatedAtMs?: number;
+}
+
+export interface WorkspaceFile {
+  path: string;
+  name: string;
+  size?: number;
+  content?: string;
+  mimeType?: string;
+}
+
+// ---- 梦境 ----
+
+export interface DreamDiary {
+  agentId?: string;
+  found?: boolean;
+  path?: string;
+  content?: string;
+}
+
 // ---- 聊天 ----
 
 export type MessageBlock =

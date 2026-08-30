@@ -1,6 +1,28 @@
 // 内联 SVG 图标(SF Symbols 风格线条)
 import { html, type TemplateResult } from 'lit';
 
+/** 渲染自定义 Logo/头像:value 为 dataURL 时渲染图片,否则当 emoji,fallback 为默认。 */
+export function renderBrand(value: string | undefined, fallback: string, cls: string): TemplateResult {
+  if (value && value.startsWith('data:image')) {
+    return html`<span class=${cls}><img class="avatar-img" src=${value} alt="" /></span>`;
+  }
+  return html`<span class=${cls}>${value || fallback}</span>`;
+}
+
+/** 上传图片 → 缩放到 128px 的 PNG dataURL(避免撑爆 localStorage)。 */
+export async function fileToAvatarDataUrl(file: File): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  // 居中裁方
+  const side = Math.min(bitmap.width, bitmap.height);
+  ctx.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, size, size);
+  return canvas.toDataURL('image/png');
+}
+
 export function icon(name: string): TemplateResult {
   const paths: Record<string, TemplateResult> = {
     chat: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>`,

@@ -20,6 +20,9 @@ import type {
   SessionUsageRow,
   SkillEntry,
   SystemInfo,
+  DreamDiary,
+  WorkspaceEntry,
+  WorkspaceFile,
 } from './types';
 import { buildPayloadV2, ensureDeviceIdentity, getStoredDeviceToken, signPayload, storeDeviceToken, type DeviceIdentity } from './device-identity';
 
@@ -284,6 +287,15 @@ export class GatewayClient {
       this.ws?.close();
       return;
     }
+    if (ge.code === 'AUTH_RATE_LIMITED' || /rate.?limit|lockout|尝试过于频繁/i.test(ge.message ?? '')) {
+      // 触发网关防爆破锁定(默认 10 次/60s 锁 10 分钟):
+      // 继续重连只会一直被拒,必须停下等锁过期或重启网关
+      this.authFailed = true;
+      this.emit('auth-rate-limited', ge);
+      this.setState('disconnected');
+      this.ws?.close();
+      return;
+    }
     if (ge.code === 'NOT_PAIRED' || ge.details?.code === 'PAIRING_REQUIRED') {
       this.pairingRequired = true;
       this.emit('pairing-required', ge);
@@ -393,7 +405,7 @@ export class GatewayClient {
   }
 
   async cronUpdate(jobId: string, patch: Record<string, unknown>): Promise<unknown> {
-    return this.request('cron.update', { id: jobId, ...patch });
+    return this.request('cron.update', { jobId, patch });
   }
 
   async cronRemove(jobId: string): Promise<unknown> {
@@ -467,5 +479,32 @@ export class GatewayClient {
   async sessionsUsage(): Promise<SessionUsageRow[]> {
     const res = await this.request<{ sessions?: SessionUsageRow[] }>('sessions.usage', { agentScope: 'all' });
     return res?.sessions ?? [];
+  }
+
+  /** 新建定时任务。schedule: {kind:'every',everyMs} 或 {kind:'cron',expr}。 */
+  async cronAdd(job: { name: string; description?: string; schedule: Record<string, unknown>; payload: { kind: 'agentTurn'; message: string }; sessionTarget?: string; enabled?: boolean }): Promise<{ id: string }> {
+    return this.request<{ id: string }>('cron.add', job);
+  }
+
+  /** 全量更新定时任务字段。网关格式:{jobId, patch}。 */
+  async cronUpdateJob(id: string, patch: Record<string, unknown>): Promise<unknown> {
+    return this.request('cron.update', { jobId: id, patch });
+  }
+
+  /** 工作区文件列表(AI 记忆浏览,只读)。 */
+  async workspaceList(agentId: string, path: string): Promise<WorkspaceEntry[]> {
+    const res = await this.request<{ entries?: WorkspaceEntry[] }>('agents.workspace.list', { agentId, path });
+    return res?.entries ?? [];
+  }
+
+  /** 读取工作区文本文件(只读)。 */
+  async workspaceGet(agentId: string, path: string): Promise<WorkspaceFile | null> {
+    const res = await this.request<{ file?: WorkspaceFile }>('agents.workspace.get', { agentId, path });
+    return res?.file ?? null;
+  }
+
+  /** 梦境日记。 */
+  async dreamDiary(): Promise<DreamDiary | null> {
+    return this.request<DreamDiary | null>('doctor.memory.dreamDiary', {});
   }
 }

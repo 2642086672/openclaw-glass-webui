@@ -112,6 +112,21 @@ const dict = {
 
   // 定时任务
   cronTitle: { zh: '定时任务', en: 'Cron jobs' },
+  cronNew: { zh: '新建任务', en: 'New job' },
+  cronEdit: { zh: '编辑任务', en: 'Edit job' },
+  cronEditing: { zh: '编辑「{name}」', en: 'Editing "{name}"' },
+  cronCreated: { zh: '任务已创建', en: 'Job created' },
+  cronSaved: { zh: '任务已保存', en: 'Job saved' },
+  cronFieldName: { zh: '任务名称', en: 'Name' },
+  cronFieldKind: { zh: '执行频率', en: 'Schedule' },
+  cronKindEvery: { zh: '每N分钟', en: 'Every N min' },
+  cronKindDaily: { zh: '每天定时', en: 'Daily at' },
+  cronEveryMinutes: { zh: '间隔(分钟)', en: 'Interval (min)' },
+  cronDailyTime: { zh: '每天执行时间', en: 'Time of day' },
+  cronCronExpr: { zh: 'Cron 表达式', en: 'Cron expression' },
+  cronFieldDesc: { zh: '任务说明(可选)', en: 'Description (optional)' },
+  cronFieldMessage: { zh: '执行内容(发给 AI 的指令)', en: 'Prompt sent to the agent' },
+  cronMessageHint: { zh: '例如:检查系统负载,异常时通知我', en: 'e.g. Check system load and notify me if abnormal' },
   cronNext: { zh: '下次', en: 'Next' },
   cronLast: { zh: '上次', en: 'Last' },
   cronRunNow: { zh: '立即运行', en: 'Run now' },
@@ -165,6 +180,28 @@ const dict = {
   // 渠道 / 安全
   channelsTitle: { zh: '渠道', en: 'Channels' },
   channelsEmpty: { zh: '暂无渠道(或网关刚重启,渠道加载中)', en: 'No channels yet (or still loading after gateway restart)' },
+  channelAdd: { zh: '新增渠道', en: 'Add channel' },
+  channelSetup: { zh: '配置 {name}', en: 'Set up {name}' },
+  channelPickHint: { zh: '选择要接入的渠道,凭据来自对应平台的机器人/应用后台', en: 'Pick a channel; credentials come from its bot/app console' },
+  channelSaved: { zh: '渠道「{id}」已写入配置', en: 'Channel "{id}" saved to config' },
+  channelDeleted: { zh: '渠道「{id}」已删除', en: 'Channel "{id}" removed' },
+  channelDelete: { zh: '删除渠道配置', en: 'Remove channel config' },
+  channelDeleteConfirm: { zh: '确定删除渠道「{id}」的配置?', en: 'Remove channel "{id}" config?' },
+  channelConfigured: { zh: '已配置', en: 'Configured' },
+  channelRestartHint: { zh: '⚠ 渠道配置需重启网关生效:在 Mac 终端执行 openclaw-webui/scripts/config-tools.sh restart-gateway', en: 'Needs gateway restart: run openclaw-webui/scripts/config-tools.sh restart-gateway' },
+  channelCustom: { zh: '自定义渠道', en: 'Custom channel' },
+  channelCustomId: { zh: '渠道 ID(小写字母/数字/短横线)', en: 'Channel ID (lowercase/digits/dash)' },
+  channelCustomJson: { zh: '渠道配置(JSON)', en: 'Channel config (JSON)' },
+  channelCustomHint: { zh: '字段名参考 openclaw.json 文档对应渠道章节;启用一般写 "enabled": true', en: 'Field names follow the channel docs; typically include "enabled": true' },
+
+  // 设置分区
+  setSecGeneral: { zh: '通用', en: 'General' },
+  setSecSession: { zh: '会话', en: 'Session' },
+  setSecModels: { zh: '模型', en: 'Models' },
+  setSecChannels: { zh: '渠道', en: 'Channels' },
+  setSecMemory: { zh: '记忆', en: 'Memory' },
+  setSecSecurity: { zh: '安全', en: 'Security' },
+  setSecConnection: { zh: '连接', en: 'Connection' },
   securityTitle: { zh: '安全', en: 'Security' },
   securityAuth: { zh: '网关认证', en: 'Gateway auth' },
   securityProfile: { zh: '工具配置档', en: 'Tool profile' },
@@ -188,6 +225,41 @@ const dict = {
   usageColCost: { zh: '费用', en: 'Cost' },
   usageEmpty: { zh: '暂无用量记录', en: 'No usage recorded yet' },
   usageNote: { zh: '费用由网关按各模型单价(每百万 tokens)计算;单价可在 设置 → 模型管理 中配置。', en: 'Cost is computed by the gateway from each model\u2019s per-million pricing. Edit pricing in Settings → Models.' },
+  usageHideTitle: { zh: '从列表隐藏此模型(本地)', en: 'Hide this model (local)' },
+  usageHideNote: { zh: '✕ 为本地隐藏记录,可随时恢复;网关不提供历史删除。', en: '✕ hides rows locally (recoverable); the gateway keeps history.' },
+  usageHiddenBtn: { zh: '已隐藏 {n} 个', en: '{n} hidden' },
+  usageHiddenTitle: { zh: '已隐藏的模型记录', en: 'Hidden model records' },
+  usageUnhide: { zh: '恢复显示', en: 'Show again' },
+
+  // Token 配额倒计时
+  quotaTitle: { zh: 'Token 配额倒计时', en: 'Token quota countdown' },
+  quotaFieldName: { zh: '配额名称', en: 'Quota name' },
+  quotaFieldScope: { zh: '适用范围', en: 'Scope' },
+  quotaAllModels: { zh: '全部模型', en: 'All models' },
+  quotaFieldWan: { zh: '总量(万 tokens)', en: 'Total (10k tokens)' },
+  quotaAdd: { zh: '添加配额', en: 'Add quota' },
+  quotaUsedSince: { zh: '建立后已消耗 {n} tokens', en: '{n} tokens used since created' },
+  quotaHint: { zh: '配额为本地记录:建立时记住当时用量,之后实时倒扣显示剩余。如厂商重置了用量,删除重建即可。', en: 'Local-only: baseline is captured on creation and deducted live. Recreate if the provider resets usage.' },
+
+  // Logo 与头像
+  brandCardTitle: { zh: 'Logo 与头像', en: 'Logo & avatar' },
+  brandAppLogo: { zh: '应用 Logo(侧边栏)', en: 'App logo (sidebar)' },
+  brandAiAvatar: { zh: 'AI 头像(对话)', en: 'AI avatar (chat)' },
+  brandUpload: { zh: '上传图片', en: 'Upload' },
+  brandReset: { zh: '恢复默认', en: 'Reset' },
+  brandHint: { zh: '输入 emoji 后回车,或上传图片(自动裁方缩至 128px)。仅保存在本浏览器,不上传服务器。', en: 'Type an emoji + Enter, or upload an image (auto-cropped to 128px). Stored in this browser only.' },
+
+  // AI 记忆 / 梦境
+  memoryTitle: { zh: 'AI 对我的记忆', en: 'What AI remembers' },
+  memoryHint: { zh: 'AI 的长期记忆文件(只读)。想修改内容,直接在聊天里告诉它即可。', en: 'Read-only view of the AI\u2019s long-term memory files. Tell it in chat to change anything.' },
+  memoryExpand: { zh: '查看', en: 'View' },
+  memoryCollapse: { zh: '收起', en: 'Collapse' },
+  memoryMainFile: { zh: '主记忆 (MEMORY.md)', en: 'Main memory (MEMORY.md)' },
+  dreamTitle: { zh: '梦境日记', en: 'Dream diary' },
+  dreamExpand: { zh: '查看', en: 'View' },
+  dreamHintFound: { zh: 'AI 在空闲时自动整理记忆写下的日记(存于 {path})', en: 'Auto-written memory consolidation diary ({path})' },
+  dreamHintEmpty: { zh: '还没有梦境记录', en: 'No dream entries yet' },
+  dreamEntryCount: { zh: '共 {n} 篇', en: '{n} entries' },
 
   // 模型管理(设置页)
   modelsCardTitle: { zh: '模型管理', en: 'Models' },
@@ -229,6 +301,7 @@ const dict = {
 
   // 协议错误码 → 人话
   errUnavailable: { zh: '网关正在启动中,稍后自动重试…', en: 'Gateway is starting up, retrying automatically…' },
+  errRateLimited: { zh: '登录尝试过于频繁,已被网关临时锁定(约 10 分钟)。可等待解锁或重启网关后点「立即重试」。', en: 'Too many attempts — temporarily locked by the gateway (~10 min). Wait, restart the gateway, then hit Retry.' },
   errNotConnected: { zh: '尚未连接网关', en: 'Not connected to the gateway' },
   errTimeout: { zh: '请求超时,请稍后重试', en: 'Request timed out, please retry' },
   errUnknown: { zh: '发生未知错误', en: 'Unknown error' },
@@ -290,6 +363,8 @@ export function localizeGatewayError(err: { code?: string; message?: string; det
       return t('authFailedBody');
     case 'UNAVAILABLE':
       return t('errUnavailable');
+    case 'AUTH_RATE_LIMITED':
+      return t('errRateLimited');
     case 'CONTROL_UI_ORIGIN_NOT_ALLOWED':
       return currentLocale === 'zh'
         ? '浏览器来源未在网关白名单中:需在 openclaw.json 的 gateway.controlUi.allowedOrigins 添加本页面地址并重启网关。'

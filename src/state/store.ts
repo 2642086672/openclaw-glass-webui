@@ -1,8 +1,14 @@
 // 全局状态:连接、会话、聊天流、系统状态
 // 用极简 store 模式(Lit ReactiveController 主机),不引额外状态库
-import type { ChatMessage, CronJob, LogTailResult, ModelRow, NodeRow, PairedDevice, PresenceEntry, SessionRow, SkillEntry, SystemInfo, UsageTotals } from '../gateway/types';
+import type { ChatMessage, CronJob, DreamDiary, LogTailResult, ModelRow, NodeRow, PairedDevice, PresenceEntry, SessionRow, SkillEntry, SystemInfo, UsageTotals, WorkspaceEntry } from '../gateway/types';
 import { GatewayClient, type ConnState, type GatewayCreds } from '../gateway/client';
 import { hasStoredDeviceToken, clearStoredDeviceTokens } from '../gateway/device-identity';
+
+/** "HH:MM" → 每天+当天的 cron 表达式(网关时区按本地)。 */
+function dailyTimeToCron(time: string): string {
+  const [h, m] = time.split(':').map(v => parseInt(v, 10) || 0);
+  return `${Math.min(59, Math.max(0, m))} ${Math.min(23, Math.max(0, h))} * * *`;
+}
 
 const CREDS_URL_KEY = 'openclaw-webui.gateway-url';
 const CREDS_TOKEN_KEY = 'openclaw-webui.gateway-token'; // sessionStorage
@@ -25,6 +31,18 @@ export interface UsageByModelRow {
   cacheWrite: number;
   totalTokens: number;
   totalCost: number;
+}
+
+export interface TokenQuota {
+  id: string;
+  /** 展示名,如"智谱赠送 1000 万" */
+  label: string;
+  /** '' = 全部模型;否则按提供商匹配 */
+  provider: string;
+  totalTokens: number;
+  /** 建立配额时该范围的已用量(基线) */
+  baselineTokens: number;
+  createdAtMs: number;
 }
 
 export interface ProviderInfo {
@@ -95,6 +113,11 @@ class AppStore {
   private logsCursor: number | undefined = undefined;
   private unsubscribers: Array<() => void> = [];
 
+  constructor() {
+    this.loadBranding();
+    this.loadUsageLocal();
+  }
+
   subscribe(fn: Sub): () => void {
     this.subs.add(fn);
     return () => this.subs.delete(fn);
@@ -104,6 +127,26 @@ class AppStore {
     for (const fn of this.subs) {
       try { fn(); } catch (e) { console.error(e); }
     }
+  }
+
+  // ---- Logo 与头像自定义(localStorage,浏览器本地) ----
+
+  branding: { appLogo?: string; aiAvatar?: string } = {};
+
+  private loadBranding(): void {
+    try {
+      const raw = localStorage.getItem('openclaw-webui.branding');
+      if (raw) this.branding = JSON.parse(raw) ?? {};
+    } catch { /* ignore */ }
+  }
+
+  /** value 为 emoji 字符或 dataURL 图片;空串 = 重置为默认。 */
+  setBranding(kind: 'appLogo' | 'aiAvatar', value: string): void {
+    this.branding = { ...this.branding };
+    if (value) this.branding[kind] = value;
+    else delete this.branding[kind];
+    try { localStorage.setItem('openclaw-webui.branding', JSON.stringify(this.branding)); } catch { /* 超限忽略 */ }
+    this.emit();
   }
 
   // ---- 凭据 ----
@@ -322,6 +365,8 @@ class AppStore {
   configProviders: ProviderInfo[] = [];
   /** 原始 provider 条目(编辑时保留未知字段用;apiKey 已被网关掩码,不要回写) */
   configProvidersRaw: Record<string, Record<string, unknown>> = {};
+  /** 已配置的消息渠道(channels 段) */
+  configChannels: Record<string, Record<string, unknown>> = {};
   /** 供 UI 显示的最近一次配置错误 */
   configError: string | null = null;
   /** 安全概览(来自 config.get) */
@@ -342,12 +387,51 @@ class AppStore {
           modelIds: (entry?.models ?? []).map(m => m?.id ?? '').filter(Boolean),
         };
       });
+      this.configChannels = (config as { channels?: Record<string, Record<string, unknown>> }).channels ?? {};
       const gw = config as { gateway?: { auth?: { mode?: string } }; tools?: { profile?: string } };
       this.securityInfo = { authMode: gw?.gateway?.auth?.mode, toolProfile: gw?.tools?.profile };
       this.configError = null;
       this.emit();
     } catch (e) {
       console.error('[store] config.get failed', e);
+    }
+  }
+
+  /** 新增/更新渠道配置(channels.<id>);渠道配置需重启网关生效。 */
+  async addChannel(id: string, channelConfig: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+    try {
+      await this.client.configPatch(
+        { channels: { [id]: channelConfig } },
+        { note: `openclaw-webui: 新增渠道 ${id}` },
+      );
+      this.configError = null;
+      await this.refreshConfigProviders();
+      return { ok: true };
+    } catch (e) {
+      const msg = String((e as Error).message ?? e);
+      this.configError = msg;
+      this.emit();
+      return { ok: false, error: msg };
+    }
+  }
+
+  /** 删除渠道配置。null 删除遇到数组时按需补 replacePaths 重试。 */
+  async removeChannel(id: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const raw = { channels: { [id]: null } };
+      try {
+        await this.client.configPatch(raw, { note: `openclaw-webui: 删除渠道 ${id}` });
+      } catch {
+        await this.client.configPatch(raw, { replacePaths: [`channels.${id}`], note: `openclaw-webui: 删除渠道 ${id}` });
+      }
+      this.configError = null;
+      await this.refreshConfigProviders();
+      return { ok: true };
+    } catch (e) {
+      const msg = String((e as Error).message ?? e);
+      this.configError = msg;
+      this.emit();
+      return { ok: false, error: msg };
     }
   }
 
@@ -422,8 +506,67 @@ class AppStore {
   usageRange = '';
   usageLoading = false;
 
+  // 用量:隐藏的模型(本地记录,网关不支持删历史)+ Token 配额倒计时
+  usageHiddenModels: string[] = [];
+  usageQuotas: TokenQuota[] = [];
+
+  private loadUsageLocal(): void {
+    try {
+      this.usageHiddenModels = JSON.parse(localStorage.getItem('openclaw-webui.usage-hidden') ?? '[]');
+    } catch { this.usageHiddenModels = []; }
+    try {
+      this.usageQuotas = JSON.parse(localStorage.getItem('openclaw-webui.usage-quotas') ?? '[]');
+    } catch { this.usageQuotas = []; }
+  }
+
+  private saveUsageLocal(): void {
+    try {
+      localStorage.setItem('openclaw-webui.usage-hidden', JSON.stringify(this.usageHiddenModels));
+      localStorage.setItem('openclaw-webui.usage-quotas', JSON.stringify(this.usageQuotas));
+    } catch { /* ignore */ }
+  }
+
+  toggleHideModel(model: string): void {
+    this.usageHiddenModels = this.usageHiddenModels.includes(model)
+      ? this.usageHiddenModels.filter(m => m !== model)
+      : [...this.usageHiddenModels, model];
+    this.saveUsageLocal();
+    this.emit();
+  }
+
+  /** 某一范围(全部或 provider)的当前已用 tokens。 */
+  private scopedUsedTokens(provider: string): number {
+    if (!provider) return this.usageTotals.totalTokens;
+    return this.usageByModel.filter(r => r.provider === provider).reduce((sum, r) => sum + r.totalTokens, 0);
+  }
+
+  addQuota(label: string, provider: string, totalTokens: number): void {
+    this.usageQuotas = [...this.usageQuotas, {
+      id: crypto.randomUUID(),
+      label,
+      provider,
+      totalTokens,
+      baselineTokens: this.scopedUsedTokens(provider),
+      createdAtMs: Date.now(),
+    }];
+    this.saveUsageLocal();
+    this.emit();
+  }
+
+  removeQuota(id: string): void {
+    this.usageQuotas = this.usageQuotas.filter(q => q.id !== id);
+    this.saveUsageLocal();
+    this.emit();
+  }
+
+  /** 配额剩余 = 总量 - (当前已用 - 建立时基线)。 */
+  quotaRemain(q: TokenQuota): number {
+    return q.totalTokens - (this.scopedUsedTokens(q.provider) - q.baselineTokens);
+  }
+
   async refreshUsage(): Promise<void> {
     if (this.client.state !== 'connected') return;
+    this.loadUsageLocal();
     this.usageLoading = true;
     this.emit();
     try {
@@ -687,6 +830,123 @@ class AppStore {
 
   async cronDelete(id: string): Promise<void> {
     try { await this.client.cronRemove(id); await this.refreshCron(); } catch (e) { console.error(e); }
+  }
+
+  /** 新建定时任务。kind: 'every'(每N分钟) | 'daily'(每天HH:MM) | 'cron'(表达式)。 */
+  async cronCreate(job: {
+    name: string;
+    description?: string;
+    kind: 'every' | 'daily' | 'cron';
+    everyMinutes?: number;
+    dailyTime?: string;
+    cronExpr?: string;
+    message: string;
+  }): Promise<{ ok: boolean; error?: string }> {
+    const schedule = job.kind === 'every'
+      ? { kind: 'every', everyMs: Math.max(1, job.everyMinutes ?? 30) * 60_000 }
+      : job.kind === 'daily'
+        ? { kind: 'cron', expr: dailyTimeToCron(job.dailyTime ?? '09:00') }
+        : { kind: 'cron', expr: job.cronExpr ?? '0 9 * * *' };
+    try {
+      await this.client.cronAdd({
+        name: job.name,
+        description: job.description || undefined,
+        schedule,
+        payload: { kind: 'agentTurn', message: job.message },
+        sessionTarget: 'isolated',
+        enabled: true,
+      });
+      await this.refreshCron();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String((e as Error).message ?? e) };
+    }
+  }
+
+  /** 编辑现有任务(全量字段更新)。 */
+  async cronUpdateJob(id: string, job: {
+    name: string;
+    description?: string;
+    kind: 'every' | 'daily' | 'cron';
+    everyMinutes?: number;
+    dailyTime?: string;
+    cronExpr?: string;
+    message: string;
+    enabled?: boolean;
+  }): Promise<{ ok: boolean; error?: string }> {
+    const schedule = job.kind === 'every'
+      ? { kind: 'every', everyMs: Math.max(1, job.everyMinutes ?? 30) * 60_000 }
+      : job.kind === 'daily'
+        ? { kind: 'cron', expr: dailyTimeToCron(job.dailyTime ?? '09:00') }
+        : { kind: 'cron', expr: job.cronExpr ?? '0 9 * * *' };
+    try {
+      await this.client.cronUpdateJob(id, {
+        name: job.name,
+        description: job.description || undefined,
+        schedule,
+        payload: { kind: 'agentTurn', message: job.message },
+        ...(job.enabled !== undefined ? { enabled: job.enabled } : {}),
+      });
+      await this.refreshCron();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String((e as Error).message ?? e) };
+    }
+  }
+
+  // ---- AI 记忆(工作区只读浏览) ----
+
+  memoryFiles: WorkspaceEntry[] = [];
+  memoryContent: { path: string; content: string } | null = null;
+  memoryLoading = false;
+
+  async loadMemoryFiles(): Promise<void> {
+    if (this.client.state !== 'connected') return;
+    this.memoryLoading = true;
+    this.emit();
+    try {
+      const root = await this.client.workspaceList('main', '.');
+      const hasMemoryMd = root.some(e => e.name === 'MEMORY.md');
+      const memDir = root.find(e => e.name === 'memory' && e.kind === 'directory');
+      let memFiles: WorkspaceEntry[] = [];
+      if (memDir) {
+        memFiles = (await this.client.workspaceList('main', 'memory')).filter(e => e.kind === 'file' && e.name.endsWith('.md'));
+      }
+      this.memoryFiles = [
+        ...(hasMemoryMd ? [{ path: 'MEMORY.md', name: 'MEMORY.md', kind: 'file', size: undefined, updatedAtMs: undefined } as WorkspaceEntry] : []),
+        ...memFiles.sort((a, b) => (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0)),
+      ];
+      if (this.memoryFiles.length && !this.memoryContent) {
+        await this.loadMemoryContent(this.memoryFiles[0].path);
+      }
+    } catch (e) { console.error('[store] workspace list failed', e); }
+    finally { this.memoryLoading = false; this.emit(); }
+  }
+
+  async loadMemoryContent(path: string): Promise<void> {
+    try {
+      const file = await this.client.workspaceGet('main', path);
+      if (file?.content !== undefined) {
+        this.memoryContent = { path, content: file.content };
+        this.emit();
+      }
+    } catch (e) { console.error('[store] workspace get failed', e); }
+  }
+
+  // ---- 梦境日记 ----
+
+  dreamDiary: DreamDiary | null = null;
+  dreamLoading = false;
+
+  async loadDreamDiary(): Promise<void> {
+    if (this.client.state !== 'connected') return;
+    this.dreamLoading = true;
+    this.emit();
+    try {
+      this.dreamDiary = await this.client.dreamDiary();
+      this.emit();
+    } catch (e) { console.error('[store] dreamDiary failed', e); }
+    finally { this.dreamLoading = false; this.emit(); }
   }
 
   // ---- 技能 / 模型 ----

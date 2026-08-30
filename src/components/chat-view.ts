@@ -4,7 +4,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { store } from '../state/store';
 import { t } from '../i18n/i18n';
 import { renderMarkdown, toVisibleItems } from '../markdown';
-import { icon } from '../icons';
+import { icon, renderBrand } from '../icons';
 
 @customElement('chat-view')
 export class ChatView extends LitElement {
@@ -118,6 +118,7 @@ export class ChatView extends LitElement {
       ? text
       : `${aborted ? `<span class="aborted-flag">⏹ ${t('chatRunAborted')}</span><br/>` : ''}${renderMarkdown(text)}`;
     return html`<div class="msg-row ${cls}">
+      ${role === 'assistant' ? renderBrand(store.branding.aiAvatar, '🦞', 'ai-avatar') : nothing}
       <div class="bubble ${cls} ${role === 'assistant' ? 'md' : ''}" .innerHTML=${inner}></div>
     </div>`;
   }
