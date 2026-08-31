@@ -178,6 +178,39 @@ export interface DreamDiary {
   content?: string;
 }
 
+// ---- 代理 / 通信 / 健康 ----
+
+export interface AgentRow {
+  id: string;
+  workspace?: string;
+  model?: { primary?: string };
+  agentRuntime?: { id?: string; source?: string };
+  thinkingDefault?: string;
+}
+
+export interface AgentsListResult {
+  defaultId?: string;
+  mainKey?: string;
+  agents?: AgentRow[];
+}
+
+export interface TtsStatus {
+  enabled?: boolean;
+  auto?: string;
+  provider?: string;
+  fallbackProvider?: string | null;
+  providerStates?: Array<{ id: string; label?: string; configured?: boolean }>;
+}
+
+export interface HealthInfo {
+  ok?: boolean;
+  ts?: number;
+  durationMs?: number;
+  eventLoop?: { degraded?: boolean; reasons?: string[]; delayP99Ms?: number; utilization?: number };
+  plugins?: { loaded?: string[]; [k: string]: unknown };
+  [k: string]: unknown;
+}
+
 // ---- 聊天 ----
 
 export type MessageBlock =

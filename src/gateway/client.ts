@@ -23,6 +23,9 @@ import type {
   DreamDiary,
   WorkspaceEntry,
   WorkspaceFile,
+  AgentsListResult,
+  TtsStatus,
+  HealthInfo,
 } from './types';
 import { buildPayloadV2, ensureDeviceIdentity, getStoredDeviceToken, signPayload, storeDeviceToken, type DeviceIdentity } from './device-identity';
 
@@ -506,5 +509,71 @@ export class GatewayClient {
   /** 梦境日记。 */
   async dreamDiary(): Promise<DreamDiary | null> {
     return this.request<DreamDiary | null>('doctor.memory.dreamDiary', {});
+  }
+
+  // ---- 设置扩展:代理 / 通信 / 健康 / 调试 ----
+
+  async agentsList(): Promise<AgentsListResult | null> {
+    return this.request<AgentsListResult | null>('agents.list', {});
+  }
+
+  async ttsStatus(): Promise<TtsStatus | null> {
+    return this.request<TtsStatus | null>('tts.status', {});
+  }
+
+  async health(): Promise<HealthInfo | null> {
+    return this.request<HealthInfo | null>('health', {});
+  }
+
+  /** 调试控制台:手动调用任意 RPC。 */
+  async rawRpc(method: string, params: unknown): Promise<unknown> {
+    return this.request(method, params);
+  }
+
+  // ---- 可操作功能:TTS / 技能开关 / 配对码 / 渠道登出 / 审批策略 / 网关更新 ----
+
+  async ttsEnable(): Promise<unknown> {
+    return this.request('tts.enable', {});
+  }
+
+  async ttsDisable(): Promise<unknown> {
+    return this.request('tts.disable', {});
+  }
+
+  async ttsSetProvider(provider: string): Promise<unknown> {
+    return this.request('tts.setProvider', { provider });
+  }
+
+  /** 技能启停(config 模式,写 skills.entries,热生效)。 */
+  async setSkillEnabled(skillKey: string, enabled: boolean): Promise<unknown> {
+    return this.configPatch(
+      { skills: { entries: { [skillKey]: { enabled } } } },
+      { note: `openclaw-webui: 技能 ${skillKey} ${enabled ? '启用' : '禁用'}` },
+    );
+  }
+
+  /** 生成移动设备配对二维码(含一次性引导令牌,注意保密)。 */
+  async deviceSetupCode(): Promise<{ setupCode?: string; qrDataUrl?: string; gatewayUrl?: string } | null> {
+    return this.request<{ setupCode?: string; qrDataUrl?: string; gatewayUrl?: string } | null>('device.pair.setupCode', {});
+  }
+
+  /** 渠道账号登出。 */
+  async channelsLogout(channel: string): Promise<unknown> {
+    return this.request('channels.logout', { channel });
+  }
+
+  /** 当前 exec 审批策略。 */
+  async execApprovalsGet(): Promise<{ file?: Record<string, unknown>; exists?: boolean } | null> {
+    return this.request<{ file?: Record<string, unknown>; exists?: boolean } | null>('exec.approvals.get', {});
+  }
+
+  /** 网关更新状态哨兵。 */
+  async updateStatus(): Promise<{ sentinel?: unknown } | null> {
+    return this.request<{ sentinel?: unknown } | null>('update.status', {});
+  }
+
+  /** 执行网关更新(成功后会自动调度重启)。 */
+  async gatewayUpdate(): Promise<unknown> {
+    return this.request('update.run', {});
   }
 }

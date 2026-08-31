@@ -3,7 +3,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { store } from '../state/store';
 import { t, getLocale, setLocale } from '../i18n/i18n';
-import { renderBrand, fileToAvatarDataUrl } from '../icons';
+import { renderBrand, fileToAvatarDataUrl, icon } from '../icons';
 
 /** 可在线新增的常用渠道(字段名来自官方文档/实测 schema)。 */
 const CHANNEL_SPECS: Array<{
@@ -37,7 +37,7 @@ const CHANNEL_SPECS: Array<{
   },
 ];
 
-type SetSection = 'general' | 'session' | 'models' | 'channels' | 'memory' | 'security' | 'connection';
+type SetSection = 'general' | 'session' | 'models' | 'channels' | 'comms' | 'mcp' | 'agents' | 'memory' | 'security' | 'infra' | 'debug' | 'connection';
 
 /** 编辑器里的模型行(全部字符串态,空=不改)。保留原始 entry 用于合入未知字段。 */
 interface EditableModel {
@@ -84,6 +84,20 @@ export class SettingsView extends LitElement {
   // 自定义渠道
   @state() private customChannelId = '';
   @state() private customChannelJson = '{"enabled": true}';
+  // MCP
+  @state() private mcpName = '';
+  @state() private mcpJson = '{"command":"","args":[]}';
+  @state() private mcpMessage: { ok: boolean; text: string } | null = null;
+  // 调试控制台
+  @state() private debugMethod = '';
+  @state() private debugParams = '';
+  @state() private debugResult = '';
+  @state() private debugBusy = false;
+  // exec 审批策略 / 网关更新
+  @state() private execOpen = false;
+  @state() private execPolicy: Record<string, unknown> | null = null;
+  @state() private updateBusy = false;
+  @state() private updateMessage: { ok: boolean; text: string } | null = null;
   // 设置二级菜单当前分区
   @state() private section: SetSection = 'general';
 
@@ -441,6 +455,17 @@ export class SettingsView extends LitElement {
     this.requestUpdate();
   }
 
+  private async logoutChannel(id: string): Promise<void> {
+    if (!window.confirm(t('channelLogoutConfirm', { id }))) return;
+    this.channelBusy = true;
+    this.requestUpdate();
+    await store.logoutChannel(id);
+    this.channelBusy = false;
+    this.channelMessage = { ok: true, text: t('channelLoggedOut', { id }) };
+    await Promise.all([store.refreshDevices(), store.refreshConfigProviders()]);
+    this.requestUpdate();
+  }
+
   private async submitCustomChannel(): Promise<void> {
     if (this.channelBusy) return;
     const id = this.customChannelId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
@@ -468,6 +493,228 @@ export class SettingsView extends LitElement {
     this.requestUpdate();
   }
 
+  private async toggleExecPolicy(): Promise<void> {
+    this.execOpen = !this.execOpen;
+    if (this.execOpen && !this.execPolicy) {
+      try {
+        const res = await store.client.execApprovalsGet();
+        this.execPolicy = res?.file ?? { note: 'empty' };
+      } catch (e) { this.execPolicy = { error: String(e) }; }
+    }
+    this.requestUpdate();
+  }
+
+  private async runGatewayUpdate(): Promise<void> {
+    if (this.updateBusy) return;
+    if (!window.confirm(t('updateConfirm'))) return;
+    this.updateBusy = true;
+    this.updateMessage = { ok: true, text: t('updateRunning') };
+    this.requestUpdate();
+    const res = await store.gatewayUpdate();
+    this.updateBusy = false;
+    this.updateMessage = res.ok
+      ? { ok: true, text: t('updateDone') }
+      : { ok: false, text: res.error ?? 'error' };
+    this.requestUpdate();
+  }
+
+  // ---- 通信(TTS/语音) ----
+  private renderCommsCard() {
+    const tts = store.ttsInfo;
+    return html`
+      <div class="card glass">
+        <h3>${t('commsTitle')}
+          <button class="toggle-btn" style="margin-left:10px;padding:4px 12px" @click=${() => void store.loadTts()}>${icon('refresh')}</button>
+        </h3>
+        ${!tts ? html`<div class="hint">${t('loading')}</div>` : html`
+          <div class="row">
+            <span class="k">${t('commsTts')}</span>
+            <span class="v seg-control" style="display:inline-flex;padding:2px">
+              <button class=${tts.enabled ? 'active' : ''} style="padding:4px 14px" @click=${() => void store.ttsSetEnabled(true)}>${t('commsOn')}</button>
+              <button class=${!tts.enabled ? 'active' : ''} style="padding:4px 14px" @click=${() => void store.ttsSetEnabled(false)}>${t('commsOff')}</button>
+            </span>
+          </div>
+          <div class="row">
+            <span class="k">${t('commsProvider')}</span>
+            <span class="v">
+              <select class="field" style="width:auto;padding:5px 26px 5px 12px" .value=${tts.provider ?? ''}
+                @change=${(e: Event) => void store.ttsSetProvider((e.target as HTMLSelectElement).value)}>
+                ${(tts.providerStates ?? []).map(p => html`<option value=${p.id} ?selected=${p.id === tts.provider}>${p.label ?? p.id}</option>`)}
+              </select>
+            </span>
+          </div>
+          <div class="row"><span class="k">${t('commsAuto')}</span><span class="v">${tts.auto ?? '—'}</span></div>
+          <div class="hint">${t('commsHintLive')}</div>
+        `}
+      </div>
+    `;
+  }
+
+  // ---- MCP 服务器 ----
+  private renderMcpCard() {
+    const servers = store.mcpServers ?? {};
+    const names = Object.keys(servers);
+    return html`
+      <div class="card glass">
+        <h3>${t('mcpTitle')}
+          <button class="toggle-btn" style="margin-left:10px;padding:4px 12px" @click=${() => void store.refreshConfigProviders()}>${icon('refresh')}</button>
+        </h3>
+        ${names.length ? names.map(n => {
+          const s = servers[n] ?? {};
+          const cmd = String(s.command ?? s.url ?? s.baseUrl ?? '');
+          const enabled = s.enabled !== false;
+          return html`
+            <div class="mp-row">
+              <div class="mp-info">
+                <div class="mp-name">${n} <span class="badge ${enabled ? 'active' : 'off'}">${enabled ? t('commsOn') : t('commsOff')}</span></div>
+                <div class="mp-sub">${cmd}</div>
+              </div>
+              <button class="icon-btn" title=${t('delete')} ?disabled=${this.channelBusy}
+                @click=${() => void this.deleteMcp(n)}>🗑</button>
+            </div>
+          `;
+        }) : html`<div class="hint">${t('mcpEmpty')}</div>`}
+
+        <div class="mp-form-title">${t('mcpAdd')}</div>
+        <label class="hint" style="margin:6px 0 4px">${t('mcpName')}</label>
+        <input class="field" placeholder="如:github" .value=${this.mcpName}
+          @input=${(e: InputEvent) => { this.mcpName = (e.target as HTMLInputElement).value; }} />
+        <label class="hint" style="margin:10px 0 4px">${t('mcpJson')}</label>
+        <textarea class="field" style="font-family:'SF Mono',ui-monospace,Menlo,monospace;font-size:12px" rows="5"
+          placeholder='{"command":"npx","args":["-y","@modelcontextprotocol/server-github"],"env":{"GITHUB_TOKEN":"…"}}'
+          .value=${this.mcpJson}
+          @input=${(e: InputEvent) => { this.mcpJson = (e.target as HTMLTextAreaElement).value; }}></textarea>
+        <div class="actions">
+          <button class="btn primary" style="width:100%" ?disabled=${!this.mcpName.trim() || this.channelBusy}
+            @click=${() => void this.submitMcp()}>${this.channelBusy ? t('loading') : t('mcpAddBtn')}</button>
+        </div>
+        <div class="hint">${t('mcpHint')}</div>
+        ${this.mcpMessage ? html`<div class="notice ${this.mcpMessage.ok ? 'ok' : 'error'}" style="margin-top:10px">${this.mcpMessage.text}</div>` : nothing}
+      </div>
+    `;
+  }
+
+  private async submitMcp(): Promise<void> {
+    if (this.channelBusy) return;
+    const name = this.mcpName.trim();
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(this.mcpJson);
+    } catch (e) {
+      this.mcpMessage = { ok: false, text: `JSON 错误:${String(e).slice(0, 80)}` };
+      this.requestUpdate();
+      return;
+    }
+    this.channelBusy = true;
+    this.requestUpdate();
+    const res = await store.addMcpServer(name, parsed);
+    this.channelBusy = false;
+    this.mcpMessage = res.ok
+      ? { ok: true, text: t('mcpSaved', { name }) }
+      : { ok: false, text: res.error ?? 'error' };
+    if (res.ok) { this.mcpName = ''; this.mcpJson = '{"command":"","args":[]}'; }
+    this.requestUpdate();
+  }
+
+  private async deleteMcp(name: string): Promise<void> {
+    if (!window.confirm(t('mcpDeleteConfirm', { name }))) return;
+    this.channelBusy = true;
+    this.requestUpdate();
+    const res = await store.removeMcpServer(name);
+    this.channelBusy = false;
+    this.mcpMessage = res.ok ? { ok: true, text: t('mcpDeleted', { name }) } : { ok: false, text: res.error ?? 'error' };
+    this.requestUpdate();
+  }
+
+  // ---- 代理(AI 与代理) ----
+  private renderAgentsCard() {
+    const list = store.agentsList;
+    return html`
+      <div class="card glass">
+        <h3>${t('agentsTitle')}
+          <button class="toggle-btn" style="margin-left:10px;padding:4px 12px" @click=${() => void store.loadAgents()}>${icon('refresh')}</button>
+        </h3>
+        ${!list ? html`<div class="hint">${t('loading')}</div>` : html`
+          ${(list.agents ?? []).map(a => html`
+            <div class="row"><span class="k">${a.id}${a.id === list.defaultId ? html`<span class="badge active" style="margin-left:6px">${t('agentsDefault')}</span>` : nothing}</span></div>
+            <div class="row"><span class="k">${t('agentsModel')}</span><span class="v">${a.model?.primary ?? '—'}</span></div>
+            <div class="row"><span class="k">${t('agentsThinking')}</span><span class="v">${a.thinkingDefault ?? 'off'}</span></div>
+            <div class="row"><span class="k">${t('agentsRuntime')}</span><span class="v">${a.agentRuntime?.id ?? 'auto'}</span></div>
+            <div class="row"><span class="k">${t('agentsWorkspace')}</span><span class="v">${a.workspace ?? '—'}</span></div>
+            <div style="height:10px"></div>
+          `)}
+          <div class="hint">${t('agentsHint')}</div>
+        `}
+      </div>
+    `;
+  }
+
+  // ---- 基础设施 ----
+  private renderInfraCard() {
+    const info = store.systemInfo;
+    return html`
+      <div class="card glass">
+        <h3>${t('infraTitle')}</h3>
+        <div class="row"><span class="k">${t('infraPort')}</span><span class="v">${info?.port ?? '—'}</span></div>
+        <div class="row"><span class="k">${t('infraLan')}</span><span class="v">${info?.lanAddress ? `${info.lanAddress}:${info.port ?? ''}` : '—'}</span></div>
+        <div class="row"><span class="k">${t('infraRuntime')}</span><span class="v">${info?.nodeVersion ?? '—'} · PID ${info?.pid ?? '—'}</span></div>
+        <div class="row"><span class="k">${t('infraOs')}</span><span class="v">${info?.osLabel ?? '—'} · ${info?.arch ?? ''}</span></div>
+        <div class="row"><span class="k">${t('infraPath')}</span><span class="v">${info?.diskPath ?? '—'}</span></div>
+        <div class="actions">
+          <button class="btn primary" style="width:100%" ?disabled=${this.updateBusy} @click=${() => void this.runGatewayUpdate()}>
+            ${this.updateBusy ? t('updateRunning') : t('infraUpdateBtn')}</button>
+        </div>
+        ${this.updateMessage ? html`<div class="notice ${this.updateMessage.ok ? 'ok' : 'error'}" style="margin-top:8px">${this.updateMessage.text}</div>` : nothing}
+        <div class="hint">${t('infraUpdateHint')}</div>
+      </div>
+    `;
+  }
+
+  // ---- 调试(RPC 控制台) ----
+  private async sendDebugRpc(): Promise<void> {
+    if (this.debugBusy) return;
+    const method = this.debugMethod.trim();
+    if (!method) return;
+    let params: unknown = {};
+    if (this.debugParams.trim()) {
+      try { params = JSON.parse(this.debugParams); }
+      catch (e) { this.debugResult = `参数 JSON 错误:${String(e).slice(0, 120)}`; this.requestUpdate(); return; }
+    }
+    this.debugBusy = true;
+    this.debugResult = t('loading');
+    this.requestUpdate();
+    try {
+      const res = await store.rawRpc(method, params);
+      this.debugResult = JSON.stringify(res, null, 2);
+    } catch (e) {
+      this.debugResult = `❌ ${String((e as Error).message ?? e)}`;
+    }
+    this.debugBusy = false;
+    this.requestUpdate();
+  }
+
+  private renderDebugCard() {
+    return html`
+      <div class="card glass">
+        <h3>${t('debugTitle')}</h3>
+        <div class="hint">${t('debugHint')}</div>
+        <label class="hint" style="margin:10px 0 4px">${t('debugMethod')}</label>
+        <input class="field" placeholder="如:status / health / models.list" .value=${this.debugMethod}
+          @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void this.sendDebugRpc(); }}
+          @input=${(e: InputEvent) => { this.debugMethod = (e.target as HTMLInputElement).value; }} />
+        <label class="hint" style="margin:10px 0 4px">${t('debugParams')}</label>
+        <textarea class="field" style="font-family:'SF Mono',ui-monospace,Menlo,monospace;font-size:12px" rows="3" placeholder="{}"
+          .value=${this.debugParams}
+          @input=${(e: InputEvent) => { this.debugParams = (e.target as HTMLTextAreaElement).value; }}></textarea>
+        <div class="actions">
+          <button class="btn primary" style="width:100%" ?disabled=${!this.debugMethod.trim() || this.debugBusy} @click=${() => void this.sendDebugRpc()}>
+            ${this.debugBusy ? t('loading') : t('debugSend')}</button>
+        </div>
+        ${this.debugResult ? html`<pre class="memory-view" style="margin-top:12px">${this.debugResult}</pre>` : nothing}
+      </div>
+    `;
+  }
+
   private renderChannelsCard() {
     const rows = store.channelRows();
     const configuredIds = Object.keys(store.configChannels);
@@ -485,6 +732,8 @@ export class SettingsView extends LitElement {
             <span class="k">${c.label}</span>
             <span class="v">
               <span class="badge ${c.state === '已连接' ? 'active' : 'dim'}">${c.state}</span>
+              <button class="icon-btn" title=${t('channelLogout')} ?disabled=${this.channelBusy}
+                @click=${() => void this.logoutChannel(c.id)}>⎋</button>
               ${configuredIds.includes(c.id) ? html`
                 <button class="icon-btn" title=${t('channelDelete')} ?disabled=${this.channelBusy}
                   @click=${() => void this.deleteChannel(c.id)}>🗑</button>` : nothing}
@@ -569,6 +818,15 @@ export class SettingsView extends LitElement {
         <div class="row"><span class="k">${t('securityProfile')}</span><span class="v">${sec.toolProfile ?? '—'}</span></div>
         <div class="row"><span class="k">${t('securityDeviceAuth')}</span><span class="v"><span class="badge active">${t('securityEnabled')}</span></span></div>
         <div class="hint">${t('securityHint')}</div>
+      </div>
+      <div class="card glass">
+        <h3>${t('securityExecTitle')}
+          <button class="toggle-btn" style="margin-left:10px;padding:4px 12px" @click=${() => void this.toggleExecPolicy()}>${this.execOpen ? t('memoryCollapse') : t('memoryExpand')}</button>
+        </h3>
+        <div class="hint">${t('securityExecHint')}</div>
+        ${this.execOpen ? html`
+          ${this.execPolicy ? html`<pre class="memory-view">${JSON.stringify(this.execPolicy, null, 2)}</pre>` : html`<div class="hint">${t('loading')}</div>`}
+        ` : nothing}
       </div>
     `;
   }
@@ -736,8 +994,13 @@ export class SettingsView extends LitElement {
       { id: 'session', labelKey: 'setSecSession' },
       { id: 'models', labelKey: 'setSecModels' },
       { id: 'channels', labelKey: 'setSecChannels' },
+      { id: 'comms', labelKey: 'setSecComms' },
+      { id: 'mcp', labelKey: 'setSecMcp' },
+      { id: 'agents', labelKey: 'setSecAgents' },
       { id: 'memory', labelKey: 'setSecMemory' },
       { id: 'security', labelKey: 'setSecSecurity' },
+      { id: 'infra', labelKey: 'setSecInfra' },
+      { id: 'debug', labelKey: 'setSecDebug' },
       { id: 'connection', labelKey: 'setSecConnection' },
     ];
     return html`
@@ -767,8 +1030,13 @@ export class SettingsView extends LitElement {
         ${this.section === 'session' ? this.renderSessionCard() : nothing}
         ${this.section === 'models' ? this.renderModelsCard() : nothing}
         ${this.section === 'channels' ? this.renderChannelsCard() : nothing}
+        ${this.section === 'comms' ? this.renderCommsCard() : nothing}
+        ${this.section === 'mcp' ? this.renderMcpCard() : nothing}
+        ${this.section === 'agents' ? this.renderAgentsCard() : nothing}
         ${this.section === 'memory' ? html`${this.renderMemoryCard()}${this.renderDreamCard()}` : nothing}
         ${this.section === 'security' ? this.renderSecurityCard() : nothing}
+        ${this.section === 'infra' ? this.renderInfraCard() : nothing}
+        ${this.section === 'debug' ? this.renderDebugCard() : nothing}
         ${this.section === 'connection' ? html`
           <div class="card glass">
             <h3>${t('settingsConnection')}</h3>

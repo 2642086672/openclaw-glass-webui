@@ -199,9 +199,84 @@ const dict = {
   setSecSession: { zh: '会话', en: 'Session' },
   setSecModels: { zh: '模型', en: 'Models' },
   setSecChannels: { zh: '渠道', en: 'Channels' },
+  setSecComms: { zh: '通信', en: 'Comms' },
+  setSecMcp: { zh: 'MCP', en: 'MCP' },
+  setSecAgents: { zh: '代理', en: 'Agents' },
   setSecMemory: { zh: '记忆', en: 'Memory' },
   setSecSecurity: { zh: '安全', en: 'Security' },
+  setSecInfra: { zh: '基础设施', en: 'Infra' },
+  setSecDebug: { zh: '调试', en: 'Debug' },
   setSecConnection: { zh: '连接', en: 'Connection' },
+
+  // 通信
+  commsTitle: { zh: '通信(TTS / 语音)', en: 'Comms (TTS / voice)' },
+  commsTts: { zh: '语音合成', en: 'TTS' },
+  commsProvider: { zh: '提供商', en: 'Provider' },
+  commsAuto: { zh: '自动播报', en: 'Auto speak' },
+  commsOn: { zh: '开', en: 'On' },
+  commsOff: { zh: '关', en: 'Off' },
+  commsConfigured: { zh: '已配置', en: 'Configured' },
+  commsNotConfigured: { zh: '未配置', en: 'Not set' },
+  commsHint: { zh: '语音相关设置为只读展示;修改请编辑 openclaw.json 的 messages.tts / talk 段。', en: 'Read-only. Edit messages.tts / talk in openclaw.json to change.' },
+  commsHintLive: { zh: '开关与提供商切换即时生效(网关保存)。', en: 'Toggle and provider changes apply immediately on the gateway.' },
+
+  // 设备配对码
+  devicesSetupCodeBtn: { zh: '配对移动设备', en: 'Pair mobile' },
+  devicesSetupCodeTitle: { zh: '移动设备配对', en: 'Pair mobile device' },
+  devicesSetupCodeHint: { zh: '用 OpenClaw 手机 App 扫码,或复制配对码粘贴到 App 设置 → Gateway。配对码含一次性引导凭据,请勿外传。', en: 'Scan with the OpenClaw mobile app, or paste the code in App → Settings → Gateway. Contains a one-time bootstrap token — keep it private.' },
+  devicesCopy: { zh: '复制配对码', en: 'Copy code' },
+  devicesCopied: { zh: '已复制', en: 'Copied' },
+
+  // 渠道登出
+  channelLogout: { zh: '登出该渠道账号', en: 'Log out channel account' },
+  channelLogoutConfirm: { zh: '确定登出渠道「{id}」的账号?登出后需重新登录才能继续收发消息。', en: 'Log out channel "{id}"? You will need to log in again.' },
+  channelLoggedOut: { zh: '渠道「{id}」已登出', en: 'Channel "{id}" logged out' },
+
+  // exec 审批 / 网关更新
+  securityExecTitle: { zh: 'Exec 审批策略', en: 'Exec approval policy' },
+  securityExecHint: { zh: '命令执行审批的当前策略(只读)。修改请编辑 exec-approvals 或用官方 CLI。', en: 'Current exec approval policy (read-only).' },
+  updateConfirm: { zh: '确定检查并执行网关更新?更新成功后网关会自动重启(面板会短暂断线重连)。', en: 'Check and run the gateway update? It restarts the gateway on success (brief disconnect).' },
+  updateRunning: { zh: '正在执行网关更新…', en: 'Running gateway update…' },
+  updateDone: { zh: '更新流程已执行,网关可能正在重启,稍后自动重连', en: 'Update executed; gateway may be restarting, reconnecting shortly…' },
+  infraUpdateBtn: { zh: '检查并更新网关', en: 'Check & update gateway' },
+  infraUpdateHint: { zh: '调用网关自带的更新流程(update.run),成功后自动重启。', en: 'Runs the gateway update flow (update.run); auto-restarts on success.' },
+
+  // MCP
+  mcpTitle: { zh: 'MCP 服务器', en: 'MCP servers' },
+  mcpEmpty: { zh: '还没有配置 MCP 服务器', en: 'No MCP servers configured' },
+  mcpAdd: { zh: '新增服务器', en: 'Add server' },
+  mcpName: { zh: '服务器名称', en: 'Server name' },
+  mcpJson: { zh: '服务器配置(JSON)', en: 'Server config (JSON)' },
+  mcpAddBtn: { zh: '添加 MCP 服务器', en: 'Add MCP server' },
+  mcpHint: { zh: '配置立即热生效,无需重启网关。字段参考 OpenClaw 文档 MCP 章节(stdio 用 command/args,远程用 url)。', en: 'Applies hot, no restart needed. See OpenClaw MCP docs for fields (command/args for stdio, url for remote).' },
+  mcpSaved: { zh: 'MCP「{name}」已保存,立即生效', en: 'MCP "{name}" saved, applies immediately' },
+  mcpDeleted: { zh: 'MCP「{name}」已删除', en: 'MCP "{name}" removed' },
+  mcpDeleteConfirm: { zh: '确定删除 MCP 服务器「{name}」?', en: 'Remove MCP server "{name}"?' },
+
+  // 代理
+  agentsTitle: { zh: 'AI 与代理', en: 'AI & agents' },
+  agentsDefault: { zh: '默认', en: 'Default' },
+  agentsModel: { zh: '模型', en: 'Model' },
+  agentsThinking: { zh: '思考默认档', en: 'Thinking default' },
+  agentsRuntime: { zh: '运行时', en: 'Runtime' },
+  agentsWorkspace: { zh: '工作区', en: 'Workspace' },
+  agentsHint: { zh: '代理列表为只读;修改配置请编辑 openclaw.json 的 agents 段。', en: 'Read-only. Edit the agents section in openclaw.json to change.' },
+
+  // 基础设施
+  infraTitle: { zh: '基础设施', en: 'Infrastructure' },
+  infraPort: { zh: '网关端口', en: 'Gateway port' },
+  infraLan: { zh: '局域网地址', en: 'LAN address' },
+  infraRuntime: { zh: '运行时', en: 'Runtime' },
+  infraOs: { zh: '系统', en: 'OS' },
+  infraPath: { zh: '数据目录', en: 'Data dir' },
+  infraHint: { zh: '网关监听与运行环境概览(只读)。', en: 'Read-only overview of the gateway runtime.' },
+
+  // 调试
+  debugTitle: { zh: '调试控制台', en: 'Debug console' },
+  debugHint: { zh: '手动调用任意网关 RPC 并查看原始返回。方法列表见协议文档,误操作可能影响配置,请谨慎。', en: 'Call any gateway RPC and inspect the raw response. Use with care.' },
+  debugMethod: { zh: 'RPC 方法名', en: 'RPC method' },
+  debugParams: { zh: '参数(JSON,可选)', en: 'Params (JSON, optional)' },
+  debugSend: { zh: '发送请求', en: 'Send' },
   securityTitle: { zh: '安全', en: 'Security' },
   securityAuth: { zh: '网关认证', en: 'Gateway auth' },
   securityProfile: { zh: '工具配置档', en: 'Tool profile' },

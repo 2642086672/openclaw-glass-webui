@@ -43,7 +43,10 @@ export class SkillsView extends LitElement {
       <div class="session-list">
         ${!all.length ? html`<div class="empty-state">${t('loading')}</div>` : ''}
         ${all.length && !shown.length ? html`<div class="empty-state">${t('empty')}</div>` : ''}
-        ${shown.map(s => html`
+        ${shown.map(s => {
+          const key = s.skillKey ?? s.name;
+          const active = !s.disabled;
+          return html`
           <div class="skill-item glass">
             <div class="s-avatar">${s.emoji || '🧩'}</div>
             <div class="s-main">
@@ -55,8 +58,14 @@ export class SkillsView extends LitElement {
               </div>
               <div class="skill-desc">${s.description || ''}</div>
             </div>
+            <span class="seg-control" style="display:inline-flex;padding:2px">
+              <button class=${active ? 'active' : ''} style="padding:4px 12px"
+                ?disabled=${active} @click=${() => void store.setSkillEnabled(key, true)}>${t('commsOn')}</button>
+              <button class=${!active ? 'active' : ''} style="padding:4px 12px"
+                ?disabled=${!active} @click=${() => void store.setSkillEnabled(key, false)}>${t('commsOff')}</button>
+            </span>
           </div>
-        `)}
+        `;})}
       </div>
     `;
   }

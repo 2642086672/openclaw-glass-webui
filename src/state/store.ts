@@ -1,6 +1,6 @@
 // 全局状态:连接、会话、聊天流、系统状态
 // 用极简 store 模式(Lit ReactiveController 主机),不引额外状态库
-import type { ChatMessage, CronJob, DreamDiary, LogTailResult, ModelRow, NodeRow, PairedDevice, PresenceEntry, SessionRow, SkillEntry, SystemInfo, UsageTotals, WorkspaceEntry } from '../gateway/types';
+import type { AgentsListResult, ChatMessage, CronJob, DreamDiary, HealthInfo, LogTailResult, ModelRow, NodeRow, PairedDevice, PresenceEntry, SessionRow, SkillEntry, SystemInfo, TtsStatus, UsageTotals, WorkspaceEntry } from '../gateway/types';
 import { GatewayClient, type ConnState, type GatewayCreds } from '../gateway/client';
 import { hasStoredDeviceToken, clearStoredDeviceTokens } from '../gateway/device-identity';
 
@@ -147,6 +147,116 @@ class AppStore {
     else delete this.branding[kind];
     try { localStorage.setItem('openclaw-webui.branding', JSON.stringify(this.branding)); } catch { /* 超限忽略 */ }
     this.emit();
+  }
+
+  // ---- 设置扩展分区:代理 / 通信 / 基础设施 / 调试 ----
+
+  agentsList: AgentsListResult | null = null;
+  ttsInfo: TtsStatus | null = null;
+  healthInfo: HealthInfo | null = null;
+  mcpServers: Record<string, Record<string, unknown>> | null = null;
+
+  async loadAgents(): Promise<void> {
+    if (this.client.state !== 'connected') return;
+    try {
+      this.agentsList = await this.client.agentsList();
+      this.emit();
+    } catch (e) { console.error('[store] agents.list failed', e); }
+  }
+
+  async loadTts(): Promise<void> {
+    if (this.client.state !== 'connected') return;
+    try {
+      this.ttsInfo = await this.client.ttsStatus();
+      this.emit();
+    } catch (e) { console.error('[store] tts.status failed', e); }
+  }
+
+  async loadHealth(): Promise<void> {
+    if (this.client.state !== 'connected') return;
+    try {
+      this.healthInfo = await this.client.health();
+      this.emit();
+    } catch (e) { console.error('[store] health failed', e); }
+  }
+
+  /** 调试控制台:手动调用任意 RPC。 */
+  async rawRpc(method: string, params: unknown): Promise<unknown> {
+    return this.client.rawRpc(method, params);
+  }
+
+  // ---- 可操作:TTS / 技能开关 / 配对码 / 渠道登出 / 网关更新 ----
+
+  async ttsSetEnabled(on: boolean): Promise<void> {
+    try {
+      await (on ? this.client.ttsEnable() : this.client.ttsDisable());
+      await this.loadTts();
+    } catch (e) { console.error('[store] tts toggle failed', e); }
+  }
+
+  async ttsSetProvider(provider: string): Promise<void> {
+    try {
+      await this.client.ttsSetProvider(provider);
+      await this.loadTts();
+    } catch (e) { console.error('[store] tts provider failed', e); }
+  }
+
+  async setSkillEnabled(skillKey: string, enabled: boolean): Promise<void> {
+    try {
+      await this.client.setSkillEnabled(skillKey, enabled);
+      await this.refreshSkills();
+    } catch (e) { console.error('[store] skill toggle failed', e); }
+  }
+
+  async deviceSetupCode(): Promise<{ setupCode?: string; qrDataUrl?: string } | null> {
+    return this.client.deviceSetupCode();
+  }
+
+  async logoutChannel(channel: string): Promise<void> {
+    try { await this.client.channelsLogout(channel); } catch (e) { console.error('[store] channels.logout failed', e); }
+  }
+
+  async gatewayUpdate(): Promise<{ ok: boolean; result?: unknown; error?: string }> {
+    try {
+      const result = await this.client.gatewayUpdate();
+      return { ok: true, result };
+    } catch (e) {
+      return { ok: false, error: String((e as Error).message ?? e) };
+    }
+  }
+
+  async updateStatus(): Promise<unknown> {
+    return this.client.updateStatus();
+  }
+
+  /** 新增/更新 MCP 服务器(热生效)。 */
+  async addMcpServer(name: string, serverConfig: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+    try {
+      await this.client.configPatch(
+        { mcp: { servers: { [name]: serverConfig } } },
+        { note: `openclaw-webui: 新增 MCP ${name}` },
+      );
+      await this.refreshConfigProviders();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String((e as Error).message ?? e) };
+    }
+  }
+
+  /** 删除 MCP 服务器(热生效)。 */
+  async removeMcpServer(name: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const raw = { mcp: { servers: { [name]: null } } };
+      try {
+        await this.client.configPatch(raw, { note: `openclaw-webui: 删除 MCP ${name}` });
+      } catch {
+        await this.client.configPatch(raw, { replacePaths: [`mcp.servers.${name}`], note: `openclaw-webui: 删除 MCP ${name}` });
+      }
+      await this.refreshConfigProviders();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String((e as Error).message ?? e) };
+    }
   }
 
   // ---- 凭据 ----
@@ -388,6 +498,7 @@ class AppStore {
         };
       });
       this.configChannels = (config as { channels?: Record<string, Record<string, unknown>> }).channels ?? {};
+      this.mcpServers = (config as { mcp?: { servers?: Record<string, Record<string, unknown>> } }).mcp?.servers ?? {};
       const gw = config as { gateway?: { auth?: { mode?: string } }; tools?: { profile?: string } };
       this.securityInfo = { authMode: gw?.gateway?.auth?.mode, toolProfile: gw?.tools?.profile };
       this.configError = null;

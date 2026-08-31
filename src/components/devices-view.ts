@@ -1,12 +1,16 @@
-// 设备视图:待配对请求(批准/拒绝)+ 已配对设备 + 节点 + 在线状态 + 渠道
+// 设备视图:待配对请求(批准/拒绝)+ 已配对设备 + 节点 + 在线状态 + 配对二维码
 import { LitElement, html, nothing } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { customElement, state } from 'lit/decorators.js';
 import { store } from '../state/store';
 import { t, formatRelative } from '../i18n/i18n';
 import { icon } from '../icons';
 
 @customElement('devices-view')
 export class DevicesView extends LitElement {
+  @state() private setupCode: { setupCode?: string; qrDataUrl?: string } | null = null;
+  @state() private setupBusy = false;
+  @state() private copied = false;
+
   createRenderRoot() { return this; }
 
   connectedCallback(): void {
@@ -15,13 +19,53 @@ export class DevicesView extends LitElement {
     void store.refreshDevices();
   }
 
+  private async generateSetupCode(): Promise<void> {
+    if (this.setupBusy) return;
+    this.setupBusy = true;
+    this.requestUpdate();
+    try {
+      this.setupCode = await store.deviceSetupCode();
+    } catch (e) {
+      console.error('[devices] setupCode failed', e);
+    }
+    this.setupBusy = false;
+    this.requestUpdate();
+  }
+
+  private async copySetupCode(): Promise<void> {
+    const code = this.setupCode?.setupCode;
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      this.copied = true;
+      this.requestUpdate();
+      setTimeout(() => { this.copied = false; this.requestUpdate(); }, 2000);
+    } catch { /* ignore */ }
+  }
+
   render() {
     return html`
       <div class="sessions-toolbar glass">
         <span class="count">${t('devicesTitle')}</span>
-        <button class="toggle-btn" @click=${() => void store.refreshDevices()}>${icon('refresh')} ${t('retry')}</button>
+        <div class="logs-toolbar-btns">
+          <button class="toggle-btn" ?disabled=${this.setupBusy} @click=${() => void this.generateSetupCode()}>
+            📱 ${t('devicesSetupCodeBtn')}</button>
+          <button class="toggle-btn" @click=${() => void store.refreshDevices()}>${icon('refresh')} ${t('retry')}</button>
+        </div>
       </div>
       <div class="session-list">
+        ${this.setupCode ? html`
+          <div class="card glass" style="margin:0 2px 12px;text-align:center">
+            <h3>${t('devicesSetupCodeTitle')}</h3>
+            <div class="hint">${t('devicesSetupCodeHint')}</div>
+            ${this.setupCode.qrDataUrl ? html`<img src=${this.setupCode.qrDataUrl} alt="QR" style="width:220px;height:220px;border-radius:var(--radius-md);margin:10px auto;display:block" />` : nothing}
+            <div class="hint" style="overflow-wrap:anywhere;font-size:11px">${this.setupCode.setupCode ?? ''}</div>
+            <div class="actions" style="justify-content:center">
+              <button class="btn" @click=${() => void this.copySetupCode()}>${this.copied ? '✓ ' + t('devicesCopied') : t('devicesCopy')}</button>
+              <button class="btn" @click=${() => { this.setupCode = null; this.requestUpdate(); }}>${t('cancel')}</button>
+            </div>
+          </div>
+        ` : nothing}
         ${this.renderPending()}
         ${this.renderPaired()}
         ${this.renderNodes()}
