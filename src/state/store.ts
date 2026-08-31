@@ -664,6 +664,30 @@ class AppStore {
     this.emit();
   }
 
+  // ---- 缓存命中率分析(省钱) ----
+
+  /** 估算缓存命中带来的节省(单位与 totalCost 一致,粗略上界):
+   *  cacheRead 的 token 如果按原价走输入会花多少钱。 */
+  estimatedCacheSavings(model: UsageByModelRow): number {
+    return (model.cacheRead ?? 0) * this.modelUnitInputCost(model.provider, model.model);
+  }
+
+  /** 从用户配置的 providers 里拿某模型的 input 单价(token 单价),回退 0。 */
+  modelUnitInputCost(providerName: string, modelId: string): number {
+    const provider = this.configProvidersRaw[providerName];
+    if (!provider) return 0;
+    const shortId = modelId.split('/').slice(1).join('/') || modelId;
+    const m = ((provider?.models ?? []) as Array<{ id?: string; cost?: Record<string, number> }>).find(x => x.id === shortId);
+    const perMillion = m?.cost?.input ?? 0;
+    return perMillion / 1_000_000;
+  }
+
+  /** 整体缓存命中率(缓存读取占总输入的比例)。 */
+  overallCacheHitRate(): number {
+    const total = this.usageTotals.input + this.usageTotals.cacheRead;
+    return total > 0 ? (this.usageTotals.cacheRead / total) * 100 : 0;
+  }
+
   removeQuota(id: string): void {
     this.usageQuotas = this.usageQuotas.filter(q => q.id !== id);
     this.saveUsageLocal();
