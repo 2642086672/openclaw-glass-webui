@@ -158,6 +158,23 @@ openclaw devices approve &lt;requestId&gt;</code></pre>
   }
 
   private renderConnPill(): TemplateResult {
+    const rs = store.reconnectState;
+    if (rs.gaveUp) {
+      return html`
+        <div class="reconnect-pill">
+          <span>${t('reconnectGaveUp')}</span>
+          <button class="btn primary" @click=${() => store.retryNow()}>${t('reconnectNow')}</button>
+        </div>
+      `;
+    }
+    if (rs.attempt > 0 && rs.delayMs > 0) {
+      return html`
+        <div class="reconnect-pill">
+          <span>${t('reconnecting', { s: Math.ceil(rs.delayMs / 1000) })} (${rs.attempt}/${rs.maxAttempts})</span>
+          <button @click=${() => store.retryNow()}>${t('reconnectNow')}</button>
+        </div>
+      `;
+    }
     return html`
       <div class="conn-pill">
         <span>${t('connDisconnected')}</span>

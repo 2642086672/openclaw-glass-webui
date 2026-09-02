@@ -11,8 +11,11 @@ import type {
   GatewayError,
   HelloOk,
   LogTailResult,
+  MarketplaceListResult,
+  MarketplaceSkill,
   ModelRow,
   NodeRow,
+  ReconnectState,
   PairedDevice,
   PresenceEntry,
   ResponseFrame,
@@ -46,6 +49,7 @@ const SCOPES = ['operator.admin', 'operator.read', 'operator.write', 'operator.a
 const REQUEST_TIMEOUT_MS = 30_000;
 const INITIAL_BACKOFF_MS = 800;
 const MAX_BACKOFF_MS = 15_000;
+const MAX_RECONNECT_ATTEMPTS = 10;
 
 export class GatewayClient {
   private ws: WebSocket | null = null;
@@ -55,6 +59,7 @@ export class GatewayClient {
   private pending = new Map<string, { resolve: (v: any) => void; reject: (e: Error) => void; timer: number }>();
   private listeners = new Map<string, Set<Listener>>();
   private backoffMs = INITIAL_BACKOFF_MS;
+  private reconnectAttempt = 0;
   private reconnectTimer: number | null = null;
   private connectNonce: string | null = null;
   private manualClose = false;
@@ -64,6 +69,7 @@ export class GatewayClient {
   state: ConnState = 'idle';
   lastError: GatewayError | null = null;
   pairingRequired = false;
+  reconnectState: ReconnectState = { attempt: 0, maxAttempts: MAX_RECONNECT_ATTEMPTS, delayMs: 0, gaveUp: false };
 
   on(event: string, fn: Listener): () => void {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set());
@@ -83,6 +89,9 @@ export class GatewayClient {
     this.creds = creds;
     this.manualClose = false;
     this.authFailed = false;
+    this.backoffMs = INITIAL_BACKOFF_MS;
+    this.reconnectAttempt = 0;
+    this.reconnectState = { attempt: 0, maxAttempts: MAX_RECONNECT_ATTEMPTS, delayMs: 0, gaveUp: false };
     this.identity = await ensureDeviceIdentity();
     this.openSocket();
   }
@@ -155,14 +164,27 @@ export class GatewayClient {
   private scheduleReconnect(): void {
     if (this.manualClose || this.authFailed) return;
     this.clearReconnect();
-    const delay = this.backoffMs;
+    this.reconnectAttempt++;
+    // 超过最大重试次数 → 放弃,UI 显示失败
+    if (this.reconnectAttempt > MAX_RECONNECT_ATTEMPTS) {
+      this.reconnectState = { attempt: this.reconnectAttempt, maxAttempts: MAX_RECONNECT_ATTEMPTS, delayMs: 0, gaveUp: true };
+      this.emit('reconnect-gave-up', this.reconnectState);
+      this.setState('disconnected');
+      return;
+    }
+    // 抖动退避: delay = backoff * (0.5 ~ 1.0)
+    const jitter = 0.5 + Math.random() * 0.5;
+    const delay = Math.round(this.backoffMs * jitter);
     this.backoffMs = Math.min(this.backoffMs * 2, MAX_BACKOFF_MS);
+    this.reconnectState = { attempt: this.reconnectAttempt, maxAttempts: MAX_RECONNECT_ATTEMPTS, delayMs: delay, gaveUp: false };
     this.reconnectTimer = window.setTimeout(() => this.openSocket(), delay);
-    this.emit('reconnect-scheduled', { delayMs: delay });
+    this.emit('reconnect-scheduled', this.reconnectState);
   }
 
   retryNow(): void {
     this.backoffMs = INITIAL_BACKOFF_MS;
+    this.reconnectAttempt = 0;
+    this.reconnectState = { attempt: 0, maxAttempts: MAX_RECONNECT_ATTEMPTS, delayMs: 0, gaveUp: false };
     this.clearReconnect();
     this.openSocket();
   }
@@ -256,6 +278,8 @@ export class GatewayClient {
     }).then(hello => {
       this.hello = hello as HelloOk;
       this.backoffMs = INITIAL_BACKOFF_MS;
+      this.reconnectAttempt = 0;
+      this.reconnectState = { attempt: 0, maxAttempts: MAX_RECONNECT_ATTEMPTS, delayMs: 0, gaveUp: false };
       this.pairingRequired = false;
       this.lastError = null;
       const dt = this.hello.auth?.deviceToken;
@@ -418,6 +442,96 @@ export class GatewayClient {
   async listSkills(): Promise<SkillEntry[]> {
     const res = await this.request<{ skills?: SkillEntry[] }>('skills.status', {});
     return res?.skills ?? [];
+  }
+
+  // ---- 技能市场(ClawHub / 第三方) ----
+  // ClawHub 是 REST API,直接 fetch,不走 WebSocket
+
+  private mapSkill(raw: any): MarketplaceSkill {
+    return {
+      id: raw.slug ?? raw.id ?? '',
+      name: raw.displayName ?? raw.name ?? raw.slug ?? '',
+      description: raw.summary ?? raw.description ?? '',
+      author: raw.owner?.handle ?? raw.author ?? '',
+      version: raw.latestVersion?.version ?? raw.version ?? '',
+      downloads: raw.stats?.downloads ?? raw.downloads ?? 0,
+      installs: raw.stats?.installs ?? 0,
+      stars: raw.stats?.stars ?? 0,
+      category: raw.topics?.[0] ?? raw.category ?? '',
+      tags: raw.topics ?? raw.tags ?? [],
+      lastUpdated: raw.updatedAt ? new Date(raw.updatedAt).toISOString() : undefined,
+    };
+  }
+
+  /** 列出市场技能(ClawHub REST API)。 */
+  async marketplaceList(category?: string, cursor?: string, limit = 50): Promise<MarketplaceListResult> {
+    const base = this.marketplaceBaseUrl();
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (cursor) params.set('cursor', cursor);
+    if (category) params.set('prefix', category);
+    params.set('sort', 'updated');
+    const url = `${base}/api/v1/skills?${params}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`ClawHub list failed: ${res.status}`);
+    const data = await res.json();
+    const items: MarketplaceSkill[] = (data.items ?? []).map((s: any) => this.mapSkill(s));
+    return {
+      items,
+      total: data.total ?? items.length,
+      page: cursor ? undefined : 1,
+      hasMore: !!data.nextCursor,
+      nextCursor: data.nextCursor ?? undefined,
+    };
+  }
+
+  /** 搜索市场技能(ClawHub REST API)。 */
+  async marketplaceSearch(query: string, limit = 20): Promise<MarketplaceListResult> {
+    const base = this.marketplaceBaseUrl();
+    const params = new URLSearchParams({ q: query, limit: String(limit) });
+    const url = `${base}/api/v1/search?${params}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`ClawHub search failed: ${res.status}`);
+    const data = await res.json();
+    const items: MarketplaceSkill[] = (data.results ?? []).map((s: any) => this.mapSkill(s));
+    return { items, total: items.length, hasMore: false };
+  }
+
+  /** 获取技能详情。 */
+  async marketplaceDetail(slug: string): Promise<MarketplaceSkill | null> {
+    const base = this.marketplaceBaseUrl();
+    const url = `${base}/api/v1/skills/${encodeURIComponent(slug)}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return this.mapSkill(data.skill ?? data);
+  }
+
+  /** 安装技能:返回下载 URL(浏览器端直接下载)。 */
+  marketplaceDownloadUrl(slug: string, version?: string): string {
+    const base = this.marketplaceBaseUrl();
+    const params = new URLSearchParams({ slug });
+    if (version) params.set('version', version);
+    return `${base}/api/v1/download?${params}`;
+  }
+
+  /** 安装指定技能(通过网关 config.patch 写入)。 */
+  async marketplaceInstall(skillId: string): Promise<unknown> {
+    // 先尝试网关 RPC,不存在则走 config.patch
+    try {
+      return await this.request('skills.install', { id: skillId });
+    } catch {
+      // fallback: 通过 config.patch 添加到 skills.entries
+      return this.configPatch(
+        { skills: { entries: { [skillId]: { enabled: true } } } },
+        { note: `openclaw-webui: 安装技能 ${skillId}` },
+      );
+    }
+  }
+
+  /** 获取市场基础 URL(默认 ClawHub)。 */
+  private marketplaceBaseUrl(): string {
+    // 可从 store 读取自定义来源,目前默认 ClawHub
+    return 'https://clawhub.ai';
   }
 
   async listModels(): Promise<ModelRow[]> {

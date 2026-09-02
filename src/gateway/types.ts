@@ -318,6 +318,58 @@ export interface CronRunEntry {
   error?: string;
 }
 
+// ---- 技能市场(ClawHub / 第三方) ----
+
+/** 市场来源配置 */
+export interface MarketplaceSource {
+  id: string;
+  name: string;
+  url: string;
+  apiKey?: string;
+  enabled: boolean;
+  isDefault: boolean;
+}
+
+export type MarketplaceSkillStatus = 'notInstalled' | 'installed' | 'updateAvailable';
+
+export interface MarketplaceSkill {
+  id: string;
+  name: string;
+  description?: string;
+  author?: string;
+  version?: string;
+  downloads?: number;
+  installs?: number;
+  stars?: number;
+  category?: string;
+  tags?: string[];
+  installed?: boolean;
+  installedVersion?: string;
+  status?: MarketplaceSkillStatus;
+  iconUrl?: string;
+  rating?: number;
+  lastUpdated?: string;
+  size?: string;
+  license?: string;
+}
+
+export interface MarketplaceListResult {
+  items: MarketplaceSkill[];
+  total: number;
+  page?: number;
+  hasMore?: boolean;
+  nextCursor?: string;
+  categories?: Array<{ id: string; name: string; count: number }>;
+}
+
+/** 重连状态(用于 UI 倒计时显示) */
+export interface ReconnectState {
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  gaveUp: boolean;
+}
+
 // ---- 技能 ----
 
 export interface SkillEntry {

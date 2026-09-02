@@ -32,13 +32,6 @@ export class UsageView extends LitElement {
     return n.toFixed(n >= 1 ? 2 : 4);
   }
 
-  /** 缓存命中率颜色:绿=高(>50%),黄=中,红=低(<20%)。 */
-  private hitColor(rate: number): string {
-    if (rate >= 50) return 'var(--ok)';
-    if (rate >= 20) return 'var(--warn)';
-    return 'var(--danger)';
-  }
-
   private addQuota(): void {
     const total = Number(this.quotaWan) * 10_000;
     if (!this.quotaLabel.trim() || !total) return;
@@ -102,8 +95,9 @@ export class UsageView extends LitElement {
     const totals = store.usageTotals;
     const hiddenSet = new Set(store.usageHiddenModels);
     const rows = store.usageByModel.filter(r => !hiddenSet.has(r.model));
-    const hitRate = store.overallCacheHitRate();
-    const savings = store.usageByModel.reduce((s, r) => s + store.estimatedCacheSavings(r), 0);
+    const cacheHitRate = totals.input + totals.cacheRead > 0
+      ? (totals.cacheRead / (totals.input + totals.cacheRead) * 100).toFixed(1)
+      : '0.0';
     return html`
       <div class="sessions-toolbar glass">
         <span class="count">${t('usageTitle')} · ${t('usageSessions', { n: store.usageSessionCount })}</span>
@@ -120,30 +114,6 @@ export class UsageView extends LitElement {
 
       <div class="usage-scroll">
         ${this.renderQuotaCard()}
-
-        <!-- 省钱中心:缓存命中率 + 估算节省 -->
-        <div class="usage-summary glass savings-summary">
-          <div class="us-item">
-            <div class="us-num" style="color:${this.hitColor(hitRate)}">${hitRate.toFixed(1)}%</div>
-            <div class="us-label">${t('savingsHitRate')}</div>
-          </div>
-          <div class="us-item">
-            <div class="us-num" style="color:var(--ok)">~${this.fmtCost(savings)}</div>
-            <div class="us-label">${t('savingsSaved')}</div>
-          </div>
-          <div class="us-item">
-            <div class="us-num">${this.fmtTok(totals.cacheRead)}</div>
-            <div class="us-label">${t('usageCacheRead')}</div>
-          </div>
-          <div class="us-item">
-            <div class="us-num">${this.fmtTok(totals.input)}</div>
-            <div class="us-label">${t('savingsColdInput')}</div>
-          </div>
-        </div>
-        <div class="savings-tips glass">
-          <div class="savings-tips-title">💡 ${t('savingsTipsTitle')}</div>
-          ${this.renderSavingsTips(hitRate)}
-        </div>
 
         <div class="usage-summary glass">
           <div class="us-item">
@@ -164,7 +134,7 @@ export class UsageView extends LitElement {
           </div>
           <div class="us-item">
             <div class="us-num">${this.fmtTok(totals.cacheRead)}</div>
-            <div class="us-label">${t('usageCacheRead')}</div>
+            <div class="us-label">${t('usageCacheRead')} (${cacheHitRate}%)</div>
           </div>
         </div>
 
@@ -182,55 +152,31 @@ export class UsageView extends LitElement {
         <div class="usage-table glass">
           <div class="ut-head">
             <span>${t('usageColModel')}</span>
-            <span>${t('usageColHit')}</span>
             <span>${t('usageColInput')}</span>
             <span>${t('usageColOutput')}</span>
             <span>${t('usageColCache')}</span>
             <span>${t('usageColSessions')}</span>
-            <span>${t('usageColSaved')}</span>
+            <span>${t('usageColCost')}</span>
             <span></span>
           </div>
           ${!rows.length ? html`<div class="empty-state">${store.usageLoading ? t('loading') : t('usageEmpty')}</div>` : ''}
-          ${rows.map(r => {
-            const rate = (r.input + r.cacheRead) > 0 ? (r.cacheRead / (r.input + r.cacheRead) * 100) : 0;
-            const saved = store.estimatedCacheSavings(r);
-            return html`
+          ${rows.map(r => html`
             <div class="ut-row">
               <span class="ut-model" title=${r.model}>
                 <span class="ut-provider">${r.provider}</span> ${r.model.split('/').slice(1).join('/') || r.model}
               </span>
-              <span style="color:${this.hitColor(rate)};font-weight:700">${rate.toFixed(0)}%</span>
               <span>${this.fmtTok(r.input)}</span>
               <span>${this.fmtTok(r.output)}</span>
               <span>${this.fmtTok(r.cacheRead)}</span>
               <span>${r.sessions}</span>
-              <span class="ut-cost" style="color:var(--ok)">~${this.fmtCost(saved)}</span>
+              <span class="ut-cost">${this.fmtCost(r.totalCost)}</span>
               <span><button class="icon-btn" title=${t('usageHideTitle')} @click=${() => store.toggleHideModel(r.model)}>✕</button></span>
             </div>
-          `})}
+          `)}
         </div>
         <div class="hint" style="padding:8px 6px">${t('usageNote')} ${t('usageHideNote')}</div>
       </div>
     `;
-  }
-
-  /** 根据整体命中率给出可执行的省钱建议。 */
-  private renderSavingsTips(hitRate: number): ReturnType<typeof html> {
-    const tips: ReturnType<typeof html>[] = [];
-    if (hitRate < 20) {
-      tips.push(html`<div>🔴 ${t('savingsTipLow')}</div>`);
-      tips.push(html`<div>· ${t('savingsTipContinue')}</div>`);
-    } else if (hitRate < 50) {
-      tips.push(html`<div>🟡 ${t('savingsTipMid')}</div>`);
-    } else {
-      tips.push(html`<div>🟢 ${t('savingsTipHigh')}</div>`);
-    }
-    const noPriceModels = store.usageByModel.filter(r => store.modelUnitInputCost(r.provider, r.model) === 0);
-    if (noPriceModels.length) {
-      tips.push(html`<div>· ${t('savingsTipNoPrice', { n: noPriceModels.length })} <span class="badge dim" style="margin-left:4px">${noPriceModels.map(m => m.model.split('/').pop()).join(', ')}</span></div>`);
-    }
-    tips.push(html`<div>· ${t('savingsTipPricing')}</div>`);
-    return html`${tips}`;
   }
 }
 

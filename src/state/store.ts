@@ -1,6 +1,6 @@
 // 全局状态:连接、会话、聊天流、系统状态
 // 用极简 store 模式(Lit ReactiveController 主机),不引额外状态库
-import type { AgentsListResult, ChatMessage, CronJob, DreamDiary, HealthInfo, LogTailResult, ModelRow, NodeRow, PairedDevice, PresenceEntry, SessionRow, SkillEntry, SystemInfo, TtsStatus, UsageTotals, WorkspaceEntry } from '../gateway/types';
+import type { AgentsListResult, ChatMessage, CronJob, DreamDiary, HealthInfo, LogTailResult, MarketplaceSkill, MarketplaceSource, ModelRow, NodeRow, PairedDevice, PresenceEntry, ReconnectState, SessionRow, SkillEntry, SystemInfo, TtsStatus, UsageTotals, WorkspaceEntry } from '../gateway/types';
 import { GatewayClient, type ConnState, type GatewayCreds } from '../gateway/client';
 import { hasStoredDeviceToken, clearStoredDeviceTokens } from '../gateway/device-identity';
 
@@ -98,6 +98,25 @@ class AppStore {
   // ---- 扩展视图数据 ----
   cronJobs: CronJob[] = [];
   skills: SkillEntry[] = [];
+
+  // ---- 重连状态(UI 倒计时用) ----
+  reconnectState: ReconnectState = { attempt: 0, maxAttempts: 10, delayMs: 0, gaveUp: false };
+
+  // ---- 技能市场(ClawHub / 第三方) ----
+  marketplaceOpen = false;
+  marketplaceItems: MarketplaceSkill[] = [];
+  marketplaceLoading = false;
+  marketplaceError: string | null = null;
+  marketplaceInstalling = new Set<string>();
+  marketplaceQuery = '';
+  marketplaceCategory = '';
+  marketplacePage = 1;
+  marketplaceHasMore = false;
+  marketplaceNextCursor: string | undefined = undefined;
+  marketplaceSources: MarketplaceSource[] = [];
+  marketplaceSelectedSource = ''; // '' = 全部来源
+  marketplaceDetailItem: MarketplaceSkill | null = null; // 详情弹窗
+  marketplaceCategories: Array<{ id: string; name: string; count: number }> = [];
   models: ModelRow[] = [];
   nodes: NodeRow[] = [];
   devicesPending: PairedDevice[] = [];
@@ -243,6 +262,20 @@ class AppStore {
     }
   }
 
+  /** 更新 MCP 服务器配置(热生效)。 */
+  async updateMcpServer(name: string, serverConfig: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+    try {
+      await this.client.configPatch(
+        { mcp: { servers: { [name]: serverConfig } } },
+        { replacePaths: [`mcp.servers.${name}`], note: `openclaw-webui: 更新 MCP ${name}` },
+      );
+      await this.refreshConfigProviders();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String((e as Error).message ?? e) };
+    }
+  }
+
   /** 删除 MCP 服务器(热生效)。 */
   async removeMcpServer(name: string): Promise<{ ok: boolean; error?: string }> {
     try {
@@ -252,6 +285,20 @@ class AppStore {
       } catch {
         await this.client.configPatch(raw, { replacePaths: [`mcp.servers.${name}`], note: `openclaw-webui: 删除 MCP ${name}` });
       }
+      await this.refreshConfigProviders();
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String((e as Error).message ?? e) };
+    }
+  }
+
+  /** 保存 exec-approvals 配置(写入 exec-approvals.json,需重启网关生效)。 */
+  async saveExecApprovals(file: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+    try {
+      await this.client.configPatch(
+        { execApprovals: file },
+        { replacePaths: ['execApprovals'], note: 'openclaw-webui: 更新 exec-approvals' },
+      );
       await this.refreshConfigProviders();
       return { ok: true };
     } catch (e) {
@@ -310,6 +357,7 @@ class AppStore {
       this.client.on('hello', async () => {
         await this.refreshSessions();
         await this.refreshSystemInfo();
+        void this.refreshConfigProviders();
         this.startInfoLoop();
         if (!this.currentSessionKey) {
           const main = this.sessions.find(s => s.key.endsWith(':main'));
@@ -327,6 +375,14 @@ class AppStore {
         sessionStorage.removeItem(CREDS_TOKEN_KEY);
         // 设备令牌也被拒(吊销/失效):清空,回退到手动输 token
         clearStoredDeviceTokens();
+        this.emit();
+      }),
+      this.client.on('reconnect-scheduled', (rs: ReconnectState) => {
+        this.reconnectState = rs;
+        this.emit();
+      }),
+      this.client.on('reconnect-gave-up', (rs: ReconnectState) => {
+        this.reconnectState = rs;
         this.emit();
       }),
       this.client.on('device-identity-failed', () => {
@@ -481,11 +537,30 @@ class AppStore {
   configError: string | null = null;
   /** 安全概览(来自 config.get) */
   securityInfo: { authMode?: string; toolProfile?: string } | null = null;
+  /** agents.defaults 快照(Agent Defaults 编辑器数据源) */
+  agentDefaults: Record<string, unknown> | null = null;
+  /** 最近一次 config.get 的原始 JSON(高级/调试展示用) */
+  lastConfigJson = '';
+  /** tools 配置(工具设置分区数据源) */
+  toolsConfig: Record<string, unknown> | null = null;
+  /** logging 配置(日志设置分区数据源) */
+  loggingConfig: Record<string, unknown> | null = null;
+  /** hooks 配置(钩子设置分区数据源) */
+  hooksConfig: Record<string, unknown> | null = null;
+  /** gateway 配置(网关网络分区数据源) */
+  gatewayConfig: Record<string, unknown> | null = null;
+  /** cron 全局配置(自动化设置分区数据源) */
+  cronConfig: Record<string, unknown> | null = null;
+  /** tts 配置(语音设置分区数据源) */
+  ttsConfig: Record<string, unknown> | null = null;
+  /** agents.entries 单代理覆盖列表 */
+  agentEntries: Array<{ id: string; config: Record<string, unknown> }> | null = null;
 
   async refreshConfigProviders(): Promise<void> {
     if (this.client.state !== 'connected') return;
     try {
       const { config } = await this.client.configGet();
+      this.lastConfigJson = JSON.stringify(config, null, 2);
       const providers = (config as { models?: { providers?: Record<string, Record<string, unknown>> } }).models?.providers ?? {};
       this.configProvidersRaw = providers;
       this.configProviders = Object.entries(providers).map(([name, p]) => {
@@ -501,11 +576,87 @@ class AppStore {
       this.mcpServers = (config as { mcp?: { servers?: Record<string, Record<string, unknown>> } }).mcp?.servers ?? {};
       const gw = config as { gateway?: { auth?: { mode?: string } }; tools?: { profile?: string } };
       this.securityInfo = { authMode: gw?.gateway?.auth?.mode, toolProfile: gw?.tools?.profile };
+      this.agentDefaults = (config as { agents?: { defaults?: Record<string, unknown> } }).agents?.defaults ?? {};
+      // 提取新分区数据
+      this.toolsConfig = (config as { tools?: Record<string, unknown> }).tools ?? {};
+      this.loggingConfig = (config as { logging?: Record<string, unknown> }).logging ?? {};
+      this.hooksConfig = (config as { hooks?: Record<string, unknown> }).hooks ?? {};
+      this.gatewayConfig = (config as { gateway?: Record<string, unknown> }).gateway ?? {};
+      this.cronConfig = (config as { cron?: Record<string, unknown> }).cron ?? {};
+      this.ttsConfig = (config as { tts?: Record<string, unknown> }).tts ?? {};
+      const entries = (config as { agents?: { entries?: Record<string, unknown> } }).agents?.entries ?? {};
+      this.agentEntries = Object.entries(entries).map(([id, c]) => ({ id, config: c as Record<string, unknown> }));
       this.configError = null;
       this.emit();
     } catch (e) {
       console.error('[store] config.get failed', e);
     }
+  }
+
+  /** 增量更新 agents.defaults(热生效);patch 里值为 null 表示删除该键。 */
+  async patchAgentDefaults(patch: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const raw = { agents: { defaults: patch } };
+      try {
+        await this.client.configPatch(raw, { note: 'openclaw-webui: 更新 Agent Defaults' });
+      } catch {
+        // 数组字段被合并时需要 replacePaths 覆盖
+        const replacePaths = Object.keys(patch).map(k => `agents.defaults.${k}`);
+        await this.client.configPatch(raw, { replacePaths, note: 'openclaw-webui: 更新 Agent Defaults' });
+      }
+      this.configError = null;
+      await this.refreshConfigProviders();
+      return { ok: true };
+    } catch (e) {
+      const msg = String((e as Error).message ?? e);
+      this.configError = msg;
+      this.emit();
+      return { ok: false, error: msg };
+    }
+  }
+
+  /** 通用 config.patch 写入工具:自动尝试 replacePaths 处理数组字段。 */
+  private async patchConfig(section: string, patch: Record<string, unknown>, note: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const raw: Record<string, unknown> = {};
+      raw[section] = patch;
+      try {
+        await this.client.configPatch(raw, { note: `openclaw-webui: ${note}` });
+      } catch {
+        const replacePaths = Object.keys(patch).map(k => `${section}.${k}`);
+        await this.client.configPatch(raw, { replacePaths, note: `openclaw-webui: ${note}` });
+      }
+      this.configError = null;
+      await this.refreshConfigProviders();
+      return { ok: true };
+    } catch (e) {
+      const msg = String((e as Error).message ?? e);
+      this.configError = msg;
+      this.emit();
+      return { ok: false, error: msg };
+    }
+  }
+
+  async patchTools(patch: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+    return this.patchConfig('tools', patch, '更新工具设置');
+  }
+  async patchLogging(patch: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+    return this.patchConfig('logging', patch, '更新日志设置');
+  }
+  async patchHooks(patch: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+    return this.patchConfig('hooks', patch, '更新钩子设置');
+  }
+  async patchGateway(patch: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+    return this.patchConfig('gateway', patch, '更新网关网络设置');
+  }
+  async patchCronConfig(patch: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+    return this.patchConfig('cron', patch, '更新Cron全局设置');
+  }
+  async patchTts(patch: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+    return this.patchConfig('tts', patch, '更新语音设置');
+  }
+  async patchAgentEntry(agentId: string, patch: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+    return this.patchConfig(`agents.entries.${agentId}`, patch, `更新代理 ${agentId} 覆盖`);
   }
 
   /** 新增/更新渠道配置(channels.<id>);渠道配置需重启网关生效。 */
@@ -574,6 +725,15 @@ class AppStore {
   get currentThinking(): string {
     const s = this.sessions.find(x => x.key === this.currentSessionKey);
     return s?.thinkingDefault ?? '';
+  }
+
+  /** 当前会话支持的思考等级列表(由网关返回)。 */
+  get currentThinkingLevels(): Array<{ id: string; label: string }> {
+    const s = this.sessions.find(x => x.key === this.currentSessionKey);
+    const levels = s?.thinkingLevels;
+    if (levels?.length) return levels;
+    // 默认:只有 off(模型不支持思考时网关只返回 off 或空)
+    return [{ id: 'off', label: '关' }];
   }
 
   get currentFastMode(): boolean {
@@ -662,30 +822,6 @@ class AppStore {
     }];
     this.saveUsageLocal();
     this.emit();
-  }
-
-  // ---- 缓存命中率分析(省钱) ----
-
-  /** 估算缓存命中带来的节省(单位与 totalCost 一致,粗略上界):
-   *  cacheRead 的 token 如果按原价走输入会花多少钱。 */
-  estimatedCacheSavings(model: UsageByModelRow): number {
-    return (model.cacheRead ?? 0) * this.modelUnitInputCost(model.provider, model.model);
-  }
-
-  /** 从用户配置的 providers 里拿某模型的 input 单价(token 单价),回退 0。 */
-  modelUnitInputCost(providerName: string, modelId: string): number {
-    const provider = this.configProvidersRaw[providerName];
-    if (!provider) return 0;
-    const shortId = modelId.split('/').slice(1).join('/') || modelId;
-    const m = ((provider?.models ?? []) as Array<{ id?: string; cost?: Record<string, number> }>).find(x => x.id === shortId);
-    const perMillion = m?.cost?.input ?? 0;
-    return perMillion / 1_000_000;
-  }
-
-  /** 整体缓存命中率(缓存读取占总输入的比例)。 */
-  overallCacheHitRate(): number {
-    const total = this.usageTotals.input + this.usageTotals.cacheRead;
-    return total > 0 ? (this.usageTotals.cacheRead / total) * 100 : 0;
   }
 
   removeQuota(id: string): void {
@@ -1185,6 +1321,230 @@ class AppStore {
       if (this.logsCursor !== undefined) {
         this.logsCursor = undefined;
       }
+    }
+  }
+
+  // ---- 技能市场(ClawHub / 第三方) ----
+
+  private readonly SOURCES_KEY = 'openclaw-webui.marketplace-sources';
+
+  /** 加载市场来源(默认 + 自定义)。 */
+  private loadSources(): void {
+    // 自定义来源从 localStorage 读
+    let custom: MarketplaceSource[] = [];
+    try {
+      const raw = localStorage.getItem(this.SOURCES_KEY);
+      if (raw) custom = JSON.parse(raw);
+    } catch { /* ignore */ }
+    // 默认来源(ClawHub 真实 API)
+    const defaults: MarketplaceSource[] = [
+      { id: 'clawhub', name: 'ClawHub', url: 'https://clawhub.ai', enabled: true, isDefault: true },
+    ];
+    this.marketplaceSources = [...defaults, ...custom];
+  }
+
+  /** 保存自定义来源到 localStorage。 */
+  private saveCustomSources(): void {
+    const custom = this.marketplaceSources.filter(s => !s.isDefault);
+    try {
+      localStorage.setItem(this.SOURCES_KEY, JSON.stringify(custom));
+    } catch { /* ignore */ }
+  }
+
+  /** 获取启用的来源。 */
+  enabledSources(): MarketplaceSource[] {
+    return this.marketplaceSources.filter(s => s.enabled);
+  }
+
+  /** 新增自定义市场来源。 */
+  addMarketplaceSource(src: Omit<MarketplaceSource, 'isDefault'>): void {
+    this.marketplaceSources = [...this.marketplaceSources, { ...src, isDefault: false }];
+    this.saveCustomSources();
+    this.emit();
+  }
+
+  /** 删除自定义市场来源。 */
+  removeMarketplaceSource(id: string): void {
+    this.marketplaceSources = this.marketplaceSources.filter(s => s.id !== id);
+    this.saveCustomSources();
+    this.emit();
+  }
+
+  /** 切换来源启用状态。 */
+  toggleSource(id: string): void {
+    const src = this.marketplaceSources.find(s => s.id === id);
+    if (src) {
+      src.enabled = !src.enabled;
+      if (src.isDefault) {
+        this.marketplaceSources = [...this.marketplaceSources];
+      } else {
+        this.saveCustomSources();
+      }
+      this.emit();
+    }
+  }
+
+  /** 切换市场子视图。打开时自动加载。 */
+  async toggleMarketplace(): Promise<void> {
+    this.marketplaceOpen = !this.marketplaceOpen;
+    this.emit();
+    if (this.marketplaceOpen) {
+      this.loadSources();
+      await this.refreshMarketplace();
+    }
+  }
+
+  /** 刷新市场(已安装 + 市场列表)。 */
+  async refreshMarketplace(): Promise<void> {
+    // 已安装技能需要 WebSocket,市场列表不需要
+    if (this.client.state === 'connected') {
+      await this.refreshSkills();
+    }
+    await this.loadMarketplace();
+    this.syncMarketplaceStatus();
+  }
+
+  /** 同步市场技能状态(已安装/可更新/未安装)。 */
+  private syncMarketplaceStatus(): void {
+    const installedMap = new Map<string, string>(); // name → installedVersion
+    for (const s of this.skills) {
+      installedMap.set(s.name, s.skillKey ?? s.name);
+    }
+    this.marketplaceItems = this.marketplaceItems.map(item => {
+      const installed = installedMap.has(item.name);
+      let status: MarketplaceSkill['status'] = 'notInstalled';
+      if (installed) {
+        status = item.version && item.installedVersion && item.version > item.installedVersion
+          ? 'updateAvailable' : 'installed';
+      }
+      return { ...item, installed, status };
+    });
+    this.emit();
+  }
+
+  /** 加载市场列表(当前分类/游标)。使用 HTTP fetch,无需 WebSocket 连接。 */
+  async loadMarketplace(): Promise<void> {
+    this.marketplaceLoading = true;
+    this.marketplaceError = null;
+    this.emit();
+    try {
+      const res = await this.client.marketplaceList(
+        this.marketplaceCategory || undefined,
+        this.marketplaceNextCursor,
+      );
+      this.marketplaceItems = res.items;
+      this.marketplaceHasMore = res.hasMore ?? false;
+      this.marketplaceNextCursor = res.nextCursor;
+      if (res.categories) this.marketplaceCategories = res.categories;
+      this.syncMarketplaceStatus();
+      this.emit();
+    } catch (e) {
+      this.marketplaceError = String((e as Error).message ?? e);
+      console.error('[store] skills.market.list failed', e);
+    } finally {
+      this.marketplaceLoading = false;
+      this.emit();
+    }
+  }
+
+  /** 搜索市场技能。 */
+  async searchMarketplace(query: string): Promise<void> {
+    this.marketplaceQuery = query;
+    this.marketplacePage = 1;
+    this.marketplaceNextCursor = undefined;
+    this.marketplaceLoading = true;
+    this.marketplaceError = null;
+    this.emit();
+    try {
+      const res = query.trim()
+        ? await this.client.marketplaceSearch(query.trim())
+        : await this.client.marketplaceList(this.marketplaceCategory || undefined);
+      this.marketplaceItems = res.items;
+      this.marketplaceHasMore = res.hasMore ?? false;
+      this.marketplaceNextCursor = res.nextCursor;
+      this.syncMarketplaceStatus();
+      this.emit();
+    } catch (e) {
+      this.marketplaceError = String((e as Error).message ?? e);
+      console.error('[store] skills.market.search failed', e);
+    } finally {
+      this.marketplaceLoading = false;
+      this.emit();
+    }
+  }
+
+  /** 切换分类。 */
+  setMarketplaceCategory(category: string): void {
+    this.marketplaceCategory = category;
+    this.marketplacePage = 1;
+    this.marketplaceNextCursor = undefined;
+    void this.loadMarketplace();
+  }
+
+  /** 下一页(游标分页)。 */
+  nextPage(): void {
+    if (!this.marketplaceHasMore) return;
+    this.marketplacePage++;
+    void this.loadMarketplace();
+  }
+
+  prevPage(): void {
+    if (this.marketplacePage <= 1) return;
+    this.marketplacePage--;
+    // 游标分页无法精确回退,重新从第一页加载
+    this.marketplaceNextCursor = undefined;
+    void this.loadMarketplace();
+  }
+
+  /** 打开/关闭详情弹窗。 */
+  openDetail(item: MarketplaceSkill | null): void {
+    this.marketplaceDetailItem = item;
+    this.emit();
+    // 从 ClawHub 拉取详情
+    if (item) {
+      void this.loadDetail(item.id);
+    }
+  }
+
+  private async loadDetail(slug: string): Promise<void> {
+    try {
+      const detail = await this.client.marketplaceDetail(slug);
+      if (detail) {
+        this.marketplaceDetailItem = detail;
+        this.emit();
+      }
+    } catch { /* ignore */ }
+  }
+
+  /** 获取下载 URL。 */
+  downloadUrl(slug: string, version?: string): string {
+    return this.client.marketplaceDownloadUrl(slug, version);
+  }
+
+  /** 安装技能。成功后返回 Promise<string>,调用方决定是否启用。 */
+  async installSkill(skillId: string): Promise<{ ok: boolean; error?: string; skillName: string }> {
+    const skill = this.marketplaceItems.find(s => s.id === skillId);
+    const skillName = skill?.name ?? skillId;
+    if (this.marketplaceInstalling.has(skillId)) return { ok: false, error: 'installing', skillName };
+    this.marketplaceInstalling.add(skillId);
+    this.emit();
+    try {
+      await this.client.marketplaceInstall(skillId);
+      // 标记本地已安装(避免重复安装)
+      const idx = this.marketplaceItems.findIndex(s => s.id === skillId);
+      if (idx >= 0) {
+        this.marketplaceItems[idx] = { ...this.marketplaceItems[idx], installed: true, status: 'installed' };
+        this.marketplaceItems = [...this.marketplaceItems];
+      }
+      this.emit();
+      return { ok: true, skillName };
+    } catch (e) {
+      const msg = String((e as Error).message ?? e);
+      console.error('[store] skills.install failed', e);
+      return { ok: false, error: msg, skillName };
+    } finally {
+      this.marketplaceInstalling.delete(skillId);
+      this.emit();
     }
   }
 }
