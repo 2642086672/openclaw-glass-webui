@@ -154,7 +154,15 @@ export class SettingsView extends LitElement {
   @state() private ttsBusy = false;
   @state() private ttsMessage: { ok: boolean; text: string } | null = null;
   @state() private ttsNewProvider = '';
-  @state() private ttsNewKey = '';
+  // TTS 增强:结构化表单
+  @state() private ttsEditName = '';
+  @state() private ttsApiKey = '';
+  @state() private ttsBaseUrl = '';
+  @state() private ttsModel = '';
+  @state() private ttsVoice = '';
+  @state() private ttsRegion = '';
+  @state() private ttsLang = '';
+  @state() private ttsExtra = '';
   // 单代理覆盖
   @state() private entryBusy = false;
   @state() private entryMessage: { ok: boolean; text: string } | null = null;
@@ -646,38 +654,6 @@ export class SettingsView extends LitElement {
       ? { ok: true, text: t('updateDone') }
       : { ok: false, text: res.error ?? 'error' };
     this.requestUpdate();
-  }
-
-  // ---- 通信(TTS/语音) ----
-  private renderCommsCard() {
-    const tts = store.ttsInfo;
-    return html`
-      <div class="card glass">
-        <h3>${t('commsTitle')}
-          <button class="toggle-btn" style="margin-left:10px;padding:4px 12px" @click=${() => void store.loadTts()}>${icon('refresh')}</button>
-        </h3>
-        ${!tts ? html`<div class="hint">${t('loading')}</div>` : html`
-          <div class="row">
-            <span class="k">${t('commsTts')}</span>
-            <span class="v seg-control" style="display:inline-flex;padding:2px">
-              <button class=${tts.enabled ? 'active' : ''} style="padding:4px 14px" @click=${() => void store.ttsSetEnabled(true)}>${t('commsOn')}</button>
-              <button class=${!tts.enabled ? 'active' : ''} style="padding:4px 14px" @click=${() => void store.ttsSetEnabled(false)}>${t('commsOff')}</button>
-            </span>
-          </div>
-          <div class="row">
-            <span class="k">${t('commsProvider')}</span>
-            <span class="v">
-              <select class="field" style="width:auto;padding:5px 26px 5px 12px" .value=${tts.provider ?? ''}
-                @change=${(e: Event) => void store.ttsSetProvider((e.target as HTMLSelectElement).value)}>
-                ${(tts.providerStates ?? []).map(p => html`<option value=${p.id} ?selected=${p.id === tts.provider}>${p.label ?? p.id}</option>`)}
-              </select>
-            </span>
-          </div>
-          <div class="row"><span class="k">${t('commsAuto')}</span><span class="v">${tts.auto ?? '—'}</span></div>
-          <div class="hint">${t('commsHintLive')}</div>
-        `}
-      </div>
-    `;
   }
 
   // ---- MCP 服务器 ----
@@ -1297,9 +1273,10 @@ export class SettingsView extends LitElement {
     const method = this.debugMethod.trim();
     if (!method) return;
     let params: unknown = {};
+    this.debugJsonErr = '';
     if (this.debugParams.trim()) {
       try { params = JSON.parse(this.debugParams); }
-      catch (e) { this.debugResult = `参数 JSON 错误:${String(e).slice(0, 120)}`; this.requestUpdate(); return; }
+      catch (e) { this.debugJsonErr = `JSON 错误: ${String(e).slice(0, 80)}`; this.requestUpdate(); return; }
     }
     this.debugBusy = true;
     this.debugResult = t('loading');
@@ -1315,25 +1292,66 @@ export class SettingsView extends LitElement {
   }
 
   private renderDebugCard() {
+    const quickMethods = [
+      { id: 'status', label: '状态', params: '{}' },
+      { id: 'health', label: '健康', params: '{}' },
+      { id: 'models.list', label: '模型列表', params: '{}' },
+      { id: 'agents.list', label: '代理列表', params: '{}' },
+      { id: 'sessions.list', label: '会话列表', params: '{}' },
+      { id: 'cron.list', label: '定时任务', params: '{}' },
+      { id: 'skills.status', label: '技能状态', params: '{}' },
+      { id: 'config.get', label: '读取配置', params: '{}' },
+      { id: 'channels.status', label: '渠道状态', params: '{}' },
+      { id: 'logs.tail', label: '日志尾部', params: '{"limit":20}' },
+      { id: 'system.info', label: '系统信息', params: '{}' },
+      { id: 'mcp.status', label: 'MCP 状态', params: '{}' },
+    ];
     return html`
       <div class="card glass">
         <h3>${t('debugTitle')}</h3>
         <div class="hint">${t('debugHint')}</div>
+
+        <div class="mp-form-title">${t('debugQuick')}</div>
+        <div class="debug-quick">
+          ${quickMethods.map(m => html`
+            <button class="toggle-btn" style="padding:4px 10px;font-size:12px;margin:2px"
+              @click=${() => { this.debugMethod = m.id; this.debugParams = m.params; this.debugResult = ''; }}>${m.label}</button>
+          `)}
+        </div>
+
         <label class="hint" style="margin:10px 0 4px">${t('debugMethod')}</label>
         <input class="field" placeholder="如:status / health / models.list" .value=${this.debugMethod}
           @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void this.sendDebugRpc(); }}
           @input=${(e: InputEvent) => { this.debugMethod = (e.target as HTMLInputElement).value; }} />
+
         <label class="hint" style="margin:10px 0 4px">${t('debugParams')}</label>
-        <textarea class="field" style="font-family:'SF Mono',ui-monospace,Menlo,monospace;font-size:12px" rows="3" placeholder="{}"
+        <textarea class="field debug-params" rows="3" placeholder='{}'
           .value=${this.debugParams}
           @input=${(e: InputEvent) => { this.debugParams = (e.target as HTMLTextAreaElement).value; }}></textarea>
+        ${this.debugJsonErr ? html`<div class="notice error" style="margin:4px 0;font-size:12px">${this.debugJsonErr}</div>` : nothing}
+
         <div class="actions">
-          <button class="btn primary" style="width:100%" ?disabled=${!this.debugMethod.trim() || this.debugBusy} @click=${() => void this.sendDebugRpc()}>
-            ${this.debugBusy ? t('loading') : t('debugSend')}</button>
+          <button class="btn primary" style="width:100%" ?disabled=${!this.debugMethod.trim() || this.debugBusy}
+            @click=${() => void this.sendDebugRpc()}>${this.debugBusy ? t('loading') : t('debugSend')}</button>
         </div>
-        ${this.debugResult ? html`<pre class="memory-view" style="margin-top:12px">${this.debugResult}</pre>` : nothing}
+
+        ${this.debugResult ? html`
+          <div class="debug-result-header">
+            <span class="hint">${t('debugResult')}</span>
+            <button class="toggle-btn" style="padding:2px 8px;font-size:11px" @click=${() => this.copyResult()}>${t('copy')}</button>
+            <button class="toggle-btn" style="padding:2px 8px;font-size:11px" @click=${() => { this.debugResult = ''; }}>${t('debugClear')}</button>
+          </div>
+          <pre class="memory-view debug-result">${this.debugResult}</pre>
+        ` : nothing}
       </div>
     `;
+  }
+
+  private debugJsonErr = '';
+  private async copyResult(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(this.debugResult);
+    } catch { /* ignore */ }
   }
 
   private renderChannelsCard() {
@@ -1640,7 +1658,6 @@ export class SettingsView extends LitElement {
       { id: 'session', labelKey: 'setSecSession' },
       { id: 'models', labelKey: 'setSecModels' },
       { id: 'channels', labelKey: 'setSecChannels' },
-      { id: 'comms', labelKey: 'setSecComms' },
       { id: 'mcp', labelKey: 'setSecMcp' },
       { id: 'agents', labelKey: 'setSecAgents' },
       { id: 'memory', labelKey: 'setSecMemory' },
@@ -1688,7 +1705,6 @@ export class SettingsView extends LitElement {
         ${this.section === 'session' ? this.renderSessionCard() : nothing}
         ${this.section === 'models' ? this.renderModelsCard() : nothing}
         ${this.section === 'channels' ? this.renderChannelsCard() : nothing}
-        ${this.section === 'comms' ? this.renderCommsCard() : nothing}
         ${this.section === 'mcp' ? this.renderMcpCard() : nothing}
         ${this.section === 'agents' ? this.renderAgentsCard() : nothing}
         ${this.section === 'memory' ? html`${this.renderMemoryCard()}${this.renderDreamCard()}` : nothing}
@@ -2109,8 +2125,97 @@ export class SettingsView extends LitElement {
     this.requestUpdate();
   }
 
+  /** 常见 TTS 服务商快速模板。 */
+  private ttsTemplates: Array<{ id: string; label: string; config: Record<string, unknown> }> = [
+    { id: 'openai', label: 'OpenAI TTS', config: { baseUrl: 'https://api.openai.com/v1', model: 'tts-1', voice: 'alloy' } },
+    { id: 'azure', label: 'Azure 语音', config: { region: 'eastasia', lang: 'zh-CN' } },
+    { id: 'google', label: 'Google TTS', config: { baseUrl: 'https://texttospeech.googleapis.com', lang: 'zh-CN' } },
+    { id: 'elevenlabs', label: 'ElevenLabs', config: { baseUrl: 'https://api.elevenlabs.io/v1', model: 'eleven_multilingual_v2', voice: '21m00Tcm4TlvDq8ikWAM' } },
+    { id: 'edge', label: 'Edge TTS(免费)', config: { provider: 'edge', voice: 'zh-CN-XiaoxiaoNeural' } },
+    { id: 'aliyun', label: '阿里云 TTS', config: { baseUrl: 'https://nls-gateway-cn-shanghai.aliyuncs.com', voice: 'zhichimei' } },
+    { id: 'tencent', label: '腾讯云 TTS', config: { baseUrl: 'https://tts.tencentcloudapi.com', voiceType: 101001 } },
+    { id: 'fishaudio', label: 'Fish Audio', config: { baseUrl: 'https://api.fish.audio', model: 'fish-speech-1.5' } },
+    { id: 'cosyvoice', label: 'CosyVoice', config: { baseUrl: 'https://api-inference.huggingface.co/models', model: 'CosyVoice2-0.5B' } },
+    { id: 'gptsovits', label: 'GPT-SoVITS', config: { baseUrl: 'http://127.0.0.1:9880' } },
+    { id: 'bark', label: 'Bark', config: { baseUrl: 'http://127.0.0.1:5000' } },
+    { id: 'custom', label: '自定义', config: {} },
+  ];
+
+  private ttsApplyTemplate(id: string): void {
+    const tpl = this.ttsTemplates.find(t => t.id === id);
+    if (!tpl) return;
+    const cfg = tpl.config;
+    this.ttsEditName = '';
+    this.ttsApiKey = '';
+    this.ttsBaseUrl = String(cfg.baseUrl ?? '');
+    this.ttsModel = String(cfg.model ?? '');
+    this.ttsVoice = String(cfg.voice ?? cfg.voiceType ?? '');
+    this.ttsRegion = String(cfg.region ?? '');
+    this.ttsLang = String(cfg.lang ?? '');
+    this.ttsExtra = '';
+  }
+
+  private ttsPrefillEdit(name: string, cfg: Record<string, unknown>): void {
+    this.ttsEditName = name;
+    this.ttsApiKey = (cfg.apiKey as string) ?? '';
+    this.ttsBaseUrl = (cfg.baseUrl as string) ?? '';
+    this.ttsModel = (cfg.model as string) ?? '';
+    this.ttsVoice = String(cfg.voice ?? cfg.voiceType ?? '');
+    this.ttsRegion = (cfg.region as string) ?? '';
+    this.ttsLang = (cfg.lang as string) ?? '';
+    const extra: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(cfg)) {
+      if (!['apiKey', 'baseUrl', 'model', 'voice', 'voiceType', 'region', 'lang'].includes(k)) extra[k] = v;
+    }
+    this.ttsExtra = Object.keys(extra).length ? JSON.stringify(extra, null, 2) : '';
+  }
+
+  private ttsBuildConfig(): Record<string, unknown> | null {
+    const cfg: Record<string, unknown> = {};
+    if (this.ttsApiKey.trim()) cfg.apiKey = this.ttsApiKey.trim();
+    if (this.ttsBaseUrl.trim()) cfg.baseUrl = this.ttsBaseUrl.trim();
+    if (this.ttsModel.trim()) cfg.model = this.ttsModel.trim();
+    if (this.ttsVoice.trim()) cfg.voice = this.ttsVoice.trim();
+    if (this.ttsRegion.trim()) cfg.region = this.ttsRegion.trim();
+    if (this.ttsLang.trim()) cfg.lang = this.ttsLang.trim();
+    if (this.ttsExtra.trim()) {
+      try {
+        const extra = JSON.parse(this.ttsExtra);
+        Object.assign(cfg, extra);
+      } catch { /* ignore */ }
+    }
+    return Object.keys(cfg).length ? cfg : null;
+  }
+
+  private async submitTtsProvider(): Promise<void> {
+    if (this.ttsBusy) return;
+    const name = (this.ttsEditName || this.ttsNewProvider).trim();
+    if (!name) return;
+    const cfg = this.ttsBuildConfig() ?? {};
+    this.ttsBusy = true; this.requestUpdate();
+    const res = await store.patchTts({ providers: { [name]: cfg } });
+    this.ttsBusy = false;
+    this.ttsMessage = res.ok ? { ok: true, text: t(this.ttsEditName ? 'ttsUpdated' : 'ttsSaved', { name }) } : { ok: false, text: `${t('agentsSaveFailed')}:${res.error ?? ''}` };
+    if (res.ok) this.ttsResetForm();
+    this.requestUpdate();
+  }
+
+  private ttsResetForm(): void {
+    this.ttsEditName = '';
+    this.ttsNewProvider = '';
+    this.ttsApiKey = '';
+    this.ttsBaseUrl = '';
+    this.ttsModel = '';
+    this.ttsVoice = '';
+    this.ttsRegion = '';
+    this.ttsLang = '';
+    this.ttsExtra = '';
+  }
+
   private renderTtsCard() {
     const d = store.ttsConfig ?? {};
+    const connected = store.connState === 'connected';
+    const enabled = d.enabled !== false;
     const provider = (d.provider as string) ?? '';
     const auto = (d.auto as string) ?? 'off';
     const providers = (d.providers as Record<string, Record<string, unknown>>) ?? {};
@@ -2119,7 +2224,15 @@ export class SettingsView extends LitElement {
       <div class="card glass">
         <h3>${t('ttsTitle')}</h3>
         <div class="hint">${t('ttsHint')}</div>
-        <div class="row"><span class="k">${t('ttsProvider')}</span>
+        ${!connected ? html`<div class="notice error" style="margin:8px 0">${t('ttsOffline')}</div>` : nothing}
+
+        <div class="row"><span class="k">${t('ttsEnabled')}</span>
+          <div class="seg-control" style="margin:0">
+            <button class=${!enabled ? 'active' : ''} @click=${() => void this.saveTts({ enabled: false })}>${t('commsOff')}</button>
+            <button class=${enabled ? 'active' : ''} @click=${() => void this.saveTts({ enabled: true })}>${t('commsOn')}</button>
+          </div>
+        </div>
+        <div class="row"><span class="k">${t('ttsActive')}</span>
           <select class="field" style="margin:0" .value=${provider} @change=${(e: Event) => void this.saveTts({ provider: (e.target as HTMLSelectElement).value || null })}>
             <option value="">${t('ttsNone')}</option>
             ${Object.keys(providers).map(p => html`<option value=${p} ?selected=${p === provider}>${p}</option>`)}
@@ -2130,21 +2243,73 @@ export class SettingsView extends LitElement {
             ${autoOpts.map(o => html`<button class=${auto === o ? 'active' : ''} @click=${() => void this.saveTts({ auto: o })}>${o}</button>`)}
           </div>
         </div>
+
         <div class="mp-form-title" style="margin-top:10px">${t('ttsProviders')}</div>
         ${Object.entries(providers).map(([name, cfg]) => html`
-          <div class="row"><span class="k">${name}</span><span class="v">${(cfg as { apiKey?: string })?.apiKey ? '••••' : t('ttsNoKey')}</span>
+          <div class="mp-row">
+            <div class="mp-info">
+              <div class="mp-name">${name} <span class="badge ${cfg.enabled !== false ? 'active' : 'off'}">${cfg.enabled !== false ? t('commsOn') : t('commsOff')}</span></div>
+              <div class="mp-sub">${(cfg as { baseUrl?: string }).baseUrl || (cfg as { voice?: string }).voice || '—'}</div>
+            </div>
+            <button class="toggle-btn" style="padding:4px 10px;font-size:12px" @click=${() => void this.saveTts({ providers: { [name]: { ...cfg as Record<string, unknown>, enabled: !((cfg as Record<string, unknown>).enabled !== false) } } })}>${(cfg as Record<string, unknown>).enabled !== false ? '◾' : '▶'}</button>
+            <button class="icon-btn" title=${t('edit')} @click=${() => this.ttsPrefillEdit(name, cfg)}>✏️</button>
             <button class="icon-btn" title=${t('delete')} @click=${() => void this.saveTts({ providers: { [name]: null } })}>🗑</button>
           </div>
         `)}
-        <div class="mp-grid mp-grid-2" style="margin-top:6px">
-          <input class="field" placeholder="provider 名 (如 openai)" .value=${this.ttsNewProvider}
-            @input=${(e: InputEvent) => { this.ttsNewProvider = (e.target as HTMLInputElement).value; }} />
-          <input class="field" placeholder="API Key" .value=${this.ttsNewKey}
-            @input=${(e: InputEvent) => { this.ttsNewKey = (e.target as HTMLInputElement).value; }} />
+
+        <div class="mp-form-title" style="margin-top:10px">${this.ttsEditName ? t('ttsEditing', { name: this.ttsEditName }) : t('ttsAddNew')}</div>
+        <div class="hint" style="margin:6px 0">${t('ttsQuickTpl')}</div>
+        <div class="tts-templates">
+          ${this.ttsTemplates.map(tpl => html`
+            <button class="toggle-btn" style="padding:4px 10px;font-size:12px;margin:2px" @click=${() => this.ttsApplyTemplate(tpl.id)}>${tpl.label}</button>
+          `)}
         </div>
+
+        <div class="mp-grid mp-grid-2" style="margin-top:8px">
+          <div>
+            <label class="hint" style="margin:4px 0">${t('ttsProviderName')}</label>
+            <input class="field" placeholder="openai / 自定义" .value=${this.ttsEditName || this.ttsNewProvider}
+              @input=${(e: InputEvent) => { if (this.ttsEditName) this.ttsNewProvider = ''; this.ttsNewProvider = (e.target as HTMLInputElement).value; }} />
+          </div>
+          <div>
+            <label class="hint" style="margin:4px 0">${t('ttsApiKey')}</label>
+            <input class="field" type="password" placeholder="sk-..." .value=${this.ttsApiKey}
+              @input=${(e: InputEvent) => { this.ttsApiKey = (e.target as HTMLInputElement).value; }} />
+          </div>
+          <div>
+            <label class="hint" style="margin:4px 0">${t('ttsBaseUrl')}</label>
+            <input class="field" placeholder="https://api.openai.com/v1" .value=${this.ttsBaseUrl}
+              @input=${(e: InputEvent) => { this.ttsBaseUrl = (e.target as HTMLInputElement).value; }} />
+          </div>
+          <div>
+            <label class="hint" style="margin:4px 0">${t('ttsModel')}</label>
+            <input class="field" placeholder="tts-1 / eleven_multilingual_v2" .value=${this.ttsModel}
+              @input=${(e: InputEvent) => { this.ttsModel = (e.target as HTMLInputElement).value; }} />
+          </div>
+          <div>
+            <label class="hint" style="margin:4px 0">${t('ttsVoice')}</label>
+            <input class="field" placeholder="alloy / zh-CN-XiaoxiaoNeural" .value=${this.ttsVoice}
+              @input=${(e: InputEvent) => { this.ttsVoice = (e.target as HTMLInputElement).value; }} />
+          </div>
+          <div>
+            <label class="hint" style="margin:4px 0">${t('ttsRegion')}</label>
+            <input class="field" placeholder="eastasia (Azure)" .value=${this.ttsRegion}
+              @input=${(e: InputEvent) => { this.ttsRegion = (e.target as HTMLInputElement).value; }} />
+          </div>
+        </div>
+
+        <label class="hint" style="margin:8px 0 4px">${t('ttsLang')}</label>
+        <input class="field" placeholder="zh-CN / en-US" .value=${this.ttsLang}
+          @input=${(e: InputEvent) => { this.ttsLang = (e.target as HTMLInputElement).value; }} />
+
+        <label class="hint" style="margin:8px 0 4px">${t('ttsExtraJson')}</label>
+        <textarea class="field" rows="2" style="font-family:'SF Mono',ui-monospace,Menlo,monospace;font-size:12px" placeholder='{"speed": 1.0, "response_format": "mp3"}' .value=${this.ttsExtra}
+          @input=${(e: InputEvent) => { this.ttsExtra = (e.target as HTMLTextAreaElement).value; }}></textarea>
+
         <div class="actions">
-          <button class="btn" ?disabled=${!this.ttsNewProvider.trim() || this.ttsBusy}
-            @click=${() => { void this.saveTts({ providers: { [this.ttsNewProvider.trim()]: { apiKey: this.ttsNewKey.trim() || undefined } } }); this.ttsNewProvider = ''; this.ttsNewKey = ''; }}>+ ${t('ttsAddProvider')}</button>
+          <button class="btn primary" style="width:100%" ?disabled=${!(this.ttsEditName || this.ttsNewProvider.trim()) || this.ttsBusy}
+            @click=${() => void this.submitTtsProvider()}>${this.ttsBusy ? t('loading') : (this.ttsEditName ? t('ttsSaveEdit') : t('ttsAddBtn'))}</button>
+          ${this.ttsEditName ? html`<button class="btn" style="width:100%;margin-top:6px" @click=${() => this.ttsResetForm()}>${t('cancel')}</button>` : nothing}
         </div>
         ${this.ttsMessage ? html`<div class="notice ${this.ttsMessage.ok ? 'ok' : 'error'}" style="margin-top:8px">${this.ttsMessage.text}</div>` : nothing}
       </div>

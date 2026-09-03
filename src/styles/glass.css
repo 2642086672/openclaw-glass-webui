@@ -1480,6 +1480,15 @@ usage-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 /* ---- MCP 增强 ---- */
 .mcp-templates { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 8px; }
 
+/* ---- TTS 增强 ---- */
+.tts-templates { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 8px; }
+
+/* ---- 调试控制台 ---- */
+.debug-quick { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 8px; }
+.debug-params { font-family: 'SF Mono', ui-monospace, Menlo, monospace; font-size: 12px; }
+.debug-result-header { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; }
+.debug-result { max-height: 400px; overflow: auto; font-size: 12px; }
+
 /* ---- 关于 / 日志 / 自动化 ---- */
 .about-logo { margin: 6px 0 12px; }
 .about-logo .brand-preview { width: 56px; height: 56px; font-size: 30px; }
