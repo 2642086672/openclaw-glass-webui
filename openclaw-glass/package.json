@@ -1,0 +1,35 @@
+{
+  "name": "openclaw-glass",
+  "version": "0.1.3",
+  "description": "OpenClaw Glass 发行版 — 官方 openclaw 引擎 + 液态玻璃控制面板,一条命令装好即用。引擎跟随官方更新,面板更新互不影响。",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/2642086672/openclaw-glass-webui.git"
+  },
+  "homepage": "https://github.com/2642086672/openclaw-glass-webui#readme",
+  "bin": {
+    "openclaw-glass": "bin/cli.js"
+  },
+  "scripts": {
+    "postinstall": "node bin/postinstall.js"
+  },
+  "dependencies": {
+    "openclaw": "^2026.8.2"
+  },
+  "files": [
+    "ui",
+    "bin",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "openclaw",
+    "glass",
+    "control-ui",
+    "dashboard",
+    "ai-agent"
+  ]
+}
